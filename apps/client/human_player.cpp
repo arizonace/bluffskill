@@ -12,6 +12,20 @@ HumanPlayer::HumanPlayer(QString apiPlayerName) : apiPlayerName_(std::move(apiPl
 
 const QString& HumanPlayer::apiPlayerName() const noexcept { return apiPlayerName_; }
 
+void HumanPlayer::selectAction(HumanAction action) noexcept { selectedAction_ = action; }
+
+std::optional<HumanAction> HumanPlayer::selectedAction() const noexcept { return selectedAction_; }
+
+QString HumanPlayer::displayName(HumanAction action) {
+    switch (action) {
+    case HumanAction::check: return "Check";
+    case HumanAction::call: return "Call";
+    case HumanAction::bet: return "Bet";
+    case HumanAction::fold: return "Fold";
+    }
+    return "Unknown";
+}
+
 QNetworkReply* HumanPlayer::attachToTable(
     QNetworkAccessManager& network,
     const QUrl& serverUrl,

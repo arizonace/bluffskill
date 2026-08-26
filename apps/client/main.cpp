@@ -1,3 +1,5 @@
+#include "human_player.hpp"
+
 #include <QApplication>
 #include <QAction>
 #include <QComboBox>
@@ -6,6 +8,7 @@
 #include <QFormLayout>
 #include <QFrame>
 #include <QIntValidator>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -24,6 +27,9 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QLineEdit>
+
+#include <memory>
+#include <vector>
 
 namespace {
 
@@ -48,6 +54,11 @@ public:
         update();
     }
 
+    void setLocalPlayerName(QString name) {
+        localPlayerName_ = std::move(name);
+        update();
+    }
+
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
@@ -65,7 +76,8 @@ protected:
         for (std::size_t i = 0; i < seats.size(); ++i) {
             const auto point = QPointF(width() * seats[i].x(), height() * seats[i].y());
             painter.setBrush(QColor("#162D24"));
-            painter.setPen(QPen(i == 5 ? QColor("#F6D365") : Qt::white, i == 5 ? 3 : 1));
+            const auto localPlayer = !localPlayerName_.isEmpty() && playerNames_[i] == localPlayerName_;
+            painter.setPen(QPen(localPlayer ? QColor("#F6D365") : Qt::white, localPlayer ? 3 : 1));
             painter.drawEllipse(point, 43, 43);
             const auto label = playerNames_[i].isEmpty()
                 ? "Seat " + QString::number(i + 1)
@@ -76,6 +88,7 @@ protected:
 
 private:
     std::array<QString, 8> playerNames_{};
+    QString localPlayerName_;
 };
 
 class ConnectionDialog final : public QDialog {
@@ -144,9 +157,14 @@ public:
         layout->addWidget(pokerTable_, 1);
         auto* actions = new QFrame(central);
         auto* actionLayout = new QHBoxLayout(actions);
-        actionLayout->addWidget(new QLabel("Amount: 0", actions));
+        actionStatus_ = new QLabel("No human player is attached.", actions);
+        actionLayout->addWidget(actionStatus_);
         for (const auto* action : {"Check", "Call", "Bet", "Fold"}) {
-            auto* button = new QPushButton(action, actions); button->setEnabled(false); actionLayout->addWidget(button);
+            auto* button = new QPushButton(action, actions);
+            button->setEnabled(false);
+            actionButtons_.push_back(button);
+            connect(button, &QPushButton::clicked, this, [this, action] { selectHumanAction(action); });
+            actionLayout->addWidget(button);
         }
         layout->addWidget(actions);
         setCentralWidget(central);
@@ -198,7 +216,7 @@ private:
         table_->clear();
         table_->addItem("Choose a competition first");
         table_->setEnabled(false);
-        pokerTable_->clearPlayers();
+        clearHumanPlayer();
         disconnectAction_->setEnabled(false);
         newGameAction_->setEnabled(false);
     }
@@ -238,6 +256,7 @@ private:
 
             connected_ = true;
             serverUrl_ = baseUrl;
+            clearHumanPlayer();
             server_->setEnabled(true);
             server_->clear();
             server_->addItem(address);
@@ -358,7 +377,15 @@ private:
 
     void newGame() {
         if (!connected_) return;
+        bool accepted = false;
+        const auto playerName = QInputDialog::getText(this, "Your player", "Player name:", QLineEdit::Normal, "Player", &accepted).trimmed();
+        if (!accepted) return;
+        if (playerName.isEmpty()) {
+            QMessageBox::warning(this, "Player name required", "Choose a name using letters, digits, and dashes.");
+            return;
+        }
         const auto attempt = connectionGeneration_;
+        pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName);
         newGameAction_->setEnabled(false);
         statusBar()->showMessage("Creating a six-player reference tournament…");
         auto* reply = postJson("/v1/competitions", QJsonObject{
@@ -374,6 +401,7 @@ private:
             if (attempt != connectionGeneration_ || !connected_) return;
             if (!success) {
                 QMessageBox::warning(this, "New game failed", "The server could not create a new competition.");
+                pendingHumanPlayer_.reset();
                 newGameAction_->setEnabled(true);
                 return;
             }
@@ -389,15 +417,65 @@ private:
             const auto success = reply->error() == QNetworkReply::NoError && status == 201;
             release(reply);
             if (attempt != connectionGeneration_ || !connected_) return;
-            newGameAction_->setEnabled(true);
             if (!success) {
                 QMessageBox::warning(this, "Reference players failed", "The competition was created, but its six reference players were not added.");
+                pendingHumanPlayer_.reset();
+                newGameAction_->setEnabled(true);
                 refreshCompetitions(competitionName);
                 return;
             }
-            statusBar()->showMessage("Created " + competitionName + " with six reference players.");
+            attachHumanPlayer(competitionName, "Red", attempt);
+        });
+    }
+
+    void attachHumanPlayer(const QString& competitionName, const QString& tableName, std::uint64_t attempt) {
+        if (!pendingHumanPlayer_) return;
+        auto* reply = track(pendingHumanPlayer_->attachToTable(network_, serverUrl_, competitionName, tableName));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto response = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 201;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            newGameAction_->setEnabled(true);
+            if (!success) {
+                const auto detail = response.value("error").toString("The server could not attach your player.");
+                QMessageBox::warning(this, "Player attachment failed", detail);
+                pendingHumanPlayer_.reset();
+                refreshCompetitions(competitionName);
+                return;
+            }
+            humanPlayer_ = std::move(pendingHumanPlayer_);
+            pokerTable_->setLocalPlayerName(humanPlayer_->apiPlayerName());
+            setActionControlsEnabled(true);
+            actionStatus_->setText("You are " + humanPlayer_->apiPlayerName() + ". Choose an action when it is your turn.");
+            statusBar()->showMessage("Created " + competitionName + " with six reference players and " + humanPlayer_->apiPlayerName() + ".");
             refreshCompetitions(competitionName);
         });
+    }
+
+    void selectHumanAction(const char* actionName) {
+        if (!humanPlayer_) return;
+        const auto action = QString::fromUtf8(actionName);
+        const auto humanAction = action == "Check" ? bluffskill::client::HumanAction::check
+            : action == "Call" ? bluffskill::client::HumanAction::call
+            : action == "Bet" ? bluffskill::client::HumanAction::bet
+            : bluffskill::client::HumanAction::fold;
+        humanPlayer_->selectAction(humanAction);
+        actionStatus_->setText(humanPlayer_->apiPlayerName() + " selected " + bluffskill::client::HumanPlayer::displayName(humanAction) + ".");
+        statusBar()->showMessage("Action selected locally; it will be submitted when the server provides a legal action turn.");
+    }
+
+    void setActionControlsEnabled(bool enabled) {
+        for (auto* button : actionButtons_) button->setEnabled(enabled);
+    }
+
+    void clearHumanPlayer() {
+        pendingHumanPlayer_.reset();
+        humanPlayer_.reset();
+        pokerTable_->setLocalPlayerName({});
+        setActionControlsEnabled(false);
+        actionStatus_->setText("No human player is attached.");
     }
 
 private:
@@ -412,8 +490,12 @@ private:
     QComboBox* competition_{};
     QComboBox* table_{};
     PokerTable* pokerTable_{};
+    QLabel* actionStatus_{};
+    std::vector<QPushButton*> actionButtons_;
     QAction* disconnectAction_{};
     QAction* newGameAction_{};
+    std::unique_ptr<bluffskill::client::HumanPlayer> pendingHumanPlayer_;
+    std::unique_ptr<bluffskill::client::HumanPlayer> humanPlayer_;
 };
 
 } // namespace

@@ -27,6 +27,20 @@ ctest --test-dir build --output-on-failure
 
 Run either application from `build/apps/server/` or `build/apps/client/`. The server chooses a free localhost port and prints it in its visible console.
 
+## Local macOS app bundles
+
+The normal build remains the cross-platform development build. On macOS, create local `.app` bundles only after it succeeds:
+
+```sh
+source scripts/commands
+build
+build-mac-bundles
+mac-server
+mac-client
+```
+
+This creates `BluffSkill Server.app` and `BluffSkill.app` beside the normal executables. The bundles have stable application identifiers for direct AppleScript control and retain separate card-face icons: 7♣ for the server and 2♦ for the client. The local bundles rely on the developer machine's Qt installation; a later distribution step will use Qt's deployment tooling to embed runtime dependencies.
+
 ## Cursor
 
 Open `repos/bluffskill` as the workspace folder. Install the CMake Tools and C/C++ extensions, select the Apple Clang kit, and configure the `build` directory. Qt Creator remains useful for examining Qt forms and signal/slot connections, but is not required.

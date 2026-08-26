@@ -6,3 +6,47 @@ alias commands='source $COMMANDS'
 alias build='cd $REPO && cmake --build build --parallel && cd -'
 alias server='$REPO/build/apps/server/bluffskill-server'
 alias client='$REPO/build/apps/client/bluffskill-client'
+
+function build-mac-bundles {
+  cmake --build "$REPO/build" --target build-mac-bundles
+}
+
+alias mac-server='open "$REPO/build/apps/server/BluffSkill Server.app"'
+alias mac-client='open "$REPO/build/apps/client/BluffSkill.app"'
+
+function bluffskill-stop {
+  osascript <<'APPLESCRIPT'
+try
+  if application id "com.bluffskill.server" is running then
+    ignoring application responses
+      tell application id "com.bluffskill.server" to quit
+    end ignoring
+  end if
+end try
+
+try
+  if application id "com.bluffskill.client" is running then
+    ignoring application responses
+      tell application id "com.bluffskill.client" to quit
+    end ignoring
+  end if
+end try
+APPLESCRIPT
+}
+
+
+function bluffskill-stop-exec {
+  osascript <<'APPLESCRIPT'
+tell application "System Events"
+  repeat with appProcess in every process whose name is "exec"
+    tell appProcess
+      if exists window "BluffSkill Server" then
+        quit
+      else if exists window "BluffSkill" then
+        quit
+      end if
+    end tell
+  end repeat
+end tell
+APPLESCRIPT
+}
