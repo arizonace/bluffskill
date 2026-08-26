@@ -15,6 +15,8 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 | `POST` | `/v1/competitions/{competition}/tables/{table}/actions` | submit an action |
 | `GET` | `/v1/competitions/{competition}/events` | stream view-projected notifications |
 
+Each table in the table-list response includes `maximumSeats` and a `players` array. Every player entry has a one-based `seat`, name, and player kind; a player may be added to a competition only when it is assigned to a free table seat.
+
 Creation request example:
 
 ```json

@@ -36,7 +36,7 @@ CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
         .name = nextCompetitionName(),
         .style = CompetitionStyle::tournament,
         .tournament = spec,
-        .tables = {{.name = "Red", .seats = 0}},
+        .tables = {{.name = "Red", .maximumSeats = spec.maximumPlayers}},
     };
     competitions_.push_back({.summary = std::move(summary)});
     return summaryOf(competitions_.back());
@@ -66,7 +66,7 @@ std::string House::nextReferencePlayerName(const Competition& competition) {
     for (int attempts = 0; attempts < 500; ++attempts) {
         const auto candidate = std::string{animals[animal(random_)]} + std::to_string(suffix(random_));
         const auto exists = std::ranges::any_of(competition.players, [&candidate](const auto& player) {
-            return player->name() == candidate;
+            return player.player->name() == candidate;
         });
         if (!exists) return candidate;
     }
@@ -76,27 +76,51 @@ std::string House::nextReferencePlayerName(const Competition& competition) {
 CompetitionSummary House::createReferencePlayers(std::string_view competitionName, std::size_t count) {
     auto& competition = findCompetition(competitionName);
     const auto occupiedSeats = competition.players.size();
-    if (count == 0 || count > 7 || count > competition.summary.tournament.maximumPlayers - occupiedSeats) {
+    std::size_t capacity = 0;
+    for (const auto& table : competition.summary.tables) capacity += table.maximumSeats;
+    const auto availableSeats = capacity - occupiedSeats;
+    if (count == 0 || count > 7 || count > availableSeats) {
         throw std::invalid_argument("reference-player count does not fit the available seats");
     }
 
     std::uniform_real_distribution<double> disposition(0.15, 0.85);
     for (std::size_t index = 0; index < count; ++index) {
-        competition.players.push_back(std::make_unique<ReferencePlayer>(nextReferencePlayerName(competition), ReferencePlayerProfile{
-            .riskTolerance = disposition(random_),
-            .optimism = disposition(random_),
-            .variability = disposition(random_),
-        }));
+        std::size_t tableIndex = 0;
+        std::size_t seat = 0;
+        for (; tableIndex < competition.summary.tables.size() && seat == 0; ++tableIndex) {
+            const auto& table = competition.summary.tables[tableIndex];
+            for (std::size_t candidateSeat = 1; candidateSeat <= table.maximumSeats; ++candidateSeat) {
+                const auto occupied = std::ranges::any_of(competition.players, [tableIndex, candidateSeat](const auto& player) {
+                    return player.tableIndex == tableIndex && player.seat == candidateSeat;
+                });
+                if (!occupied) {
+                    seat = candidateSeat;
+                    break;
+                }
+            }
+        }
+        if (seat == 0) throw std::runtime_error("could not find a free seat");
+        competition.players.push_back({
+            .player = std::make_unique<ReferencePlayer>(nextReferencePlayerName(competition), ReferencePlayerProfile{
+                .riskTolerance = disposition(random_),
+                .optimism = disposition(random_),
+                .variability = disposition(random_),
+            }),
+            .tableIndex = tableIndex - 1,
+            .seat = seat,
+        });
     }
-    competition.summary.tables.front().seats = competition.players.size();
     return summaryOf(competition);
 }
 
 CompetitionSummary House::summaryOf(const Competition& competition) const {
     auto summary = competition.summary;
-    summary.players.clear();
+    for (auto& table : summary.tables) table.players.clear();
     for (const auto& player : competition.players) {
-        summary.players.push_back({.name = player->name(), .kind = player->kind()});
+        summary.tables[player.tableIndex].players.push_back({
+            .player = {.name = player.player->name(), .kind = player.player->kind()},
+            .seat = player.seat,
+        });
     }
     return summary;
 }

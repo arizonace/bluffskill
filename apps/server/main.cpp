@@ -41,9 +41,9 @@ public:
         for (const auto& competition : house_.competitions()) {
             auto* competitionItem = new QTreeWidgetItem(house, {QString::fromStdString(competition.name)});
             for (const auto& table : competition.tables) {
-                auto* tableItem = new QTreeWidgetItem(competitionItem, {QString::fromStdString(table.name) + " (" + QString::number(table.seats) + " / " + QString::number(competition.tournament.maximumPlayers) + ")"});
-                for (const auto& player : competition.players) {
-                    new QTreeWidgetItem(tableItem, {QString::fromStdString(player.name) + " (" + QString::fromUtf8(bluffskill::poker::toString(player.kind)) + ")"});
+                auto* tableItem = new QTreeWidgetItem(competitionItem, {QString::fromStdString(table.name) + " (" + QString::number(table.players.size()) + " / " + QString::number(table.maximumSeats) + ")"});
+                for (const auto& seatedPlayer : table.players) {
+                    new QTreeWidgetItem(tableItem, {QString::number(seatedPlayer.seat) + ": " + QString::fromStdString(seatedPlayer.player.name) + " (" + QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind)) + ")"});
                 }
             }
         }
@@ -60,8 +60,13 @@ private:
 
 QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competition) {
     QJsonArray players;
-    for (const auto& player : competition.players) {
-        players.append(QJsonObject{{"name", QString::fromStdString(player.name)}, {"kind", QString::fromUtf8(bluffskill::poker::toString(player.kind))}});
+    for (const auto& table : competition.tables) {
+        for (const auto& seatedPlayer : table.players) {
+            players.append(QJsonObject{{"name", QString::fromStdString(seatedPlayer.player.name)},
+                                       {"kind", QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind))},
+                                       {"table", QString::fromStdString(table.name)},
+                                       {"seat", static_cast<int>(seatedPlayer.seat)}});
+        }
     }
     return {{"name", QString::fromStdString(competition.name)},
             {"style", "Tournament"},
@@ -72,8 +77,15 @@ QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competi
 }
 
 QJsonObject tableJson(const bluffskill::poker::TableSummary& table) {
+    QJsonArray players;
+    for (const auto& seatedPlayer : table.players) {
+        players.append(QJsonObject{{"name", QString::fromStdString(seatedPlayer.player.name)},
+                                   {"kind", QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind))},
+                                   {"seat", static_cast<int>(seatedPlayer.seat)}});
+    }
     return {{"name", QString::fromStdString(table.name)},
-            {"seats", static_cast<int>(table.seats)}};
+            {"maximumSeats", static_cast<int>(table.maximumSeats)},
+            {"players", players}};
 }
 
 } // namespace

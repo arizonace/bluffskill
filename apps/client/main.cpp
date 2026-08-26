@@ -20,6 +20,7 @@
 #include <QPushButton>
 #include <QStatusBar>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QLineEdit>
@@ -29,6 +30,23 @@ namespace {
 class PokerTable final : public QWidget {
 public:
     explicit PokerTable(QWidget* parent = nullptr) : QWidget(parent) { setMinimumSize(900, 520); }
+
+    void setPlayers(const QJsonArray& players) {
+        playerNames_.fill({});
+        for (const auto& item : players) {
+            const auto player = item.toObject();
+            const auto seat = player.value("seat").toInt();
+            if (seat >= 1 && seat <= static_cast<int>(playerNames_.size())) {
+                playerNames_[static_cast<std::size_t>(seat - 1)] = player.value("name").toString();
+            }
+        }
+        update();
+    }
+
+    void clearPlayers() {
+        playerNames_.fill({});
+        update();
+    }
 
 protected:
     void paintEvent(QPaintEvent*) override {
@@ -49,9 +67,15 @@ protected:
             painter.setBrush(QColor("#162D24"));
             painter.setPen(QPen(i == 5 ? QColor("#F6D365") : Qt::white, i == 5 ? 3 : 1));
             painter.drawEllipse(point, 43, 43);
-            painter.drawText(QRectF(point.x() - 58, point.y() - 10, 116, 20), Qt::AlignCenter, "Seat " + QString::number(i + 1));
+            const auto label = playerNames_[i].isEmpty()
+                ? "Seat " + QString::number(i + 1)
+                : playerNames_[i] + "\nSeat " + QString::number(i + 1);
+            painter.drawText(QRectF(point.x() - 58, point.y() - 20, 116, 40), Qt::AlignCenter, label);
         }
     }
+
+private:
+    std::array<QString, 8> playerNames_{};
 };
 
 class ConnectionDialog final : public QDialog {
@@ -116,7 +140,8 @@ public:
         table_ = new QComboBox(connection); table_->addItem("Choose a competition first"); table_->setEnabled(false);
         form->addRow("Server", server_); form->addRow("Competition", competition_); form->addRow("Table", table_);
         layout->addWidget(connection);
-        layout->addWidget(new PokerTable(central), 1);
+        pokerTable_ = new PokerTable(central);
+        layout->addWidget(pokerTable_, 1);
         auto* actions = new QFrame(central);
         auto* actionLayout = new QHBoxLayout(actions);
         actionLayout->addWidget(new QLabel("Amount: 0", actions));
@@ -135,6 +160,8 @@ public:
         newGameAction_ = gameMenu->addAction("New Game…");
         newGameAction_->setEnabled(false);
         connect(newGameAction_, &QAction::triggered, this, [this] { newGame(); });
+        connect(competition_, &QComboBox::currentIndexChanged, this, [this] { refreshTables(); });
+        connect(table_, &QComboBox::currentIndexChanged, this, [this] { refreshSeats(); });
         statusBar()->showMessage("Choose Connection → Connect… to begin.");
     }
 
@@ -171,6 +198,7 @@ private:
         table_->clear();
         table_->addItem("Choose a competition first");
         table_->setEnabled(false);
+        pokerTable_->clearPlayers();
         disconnectAction_->setEnabled(false);
         newGameAction_->setEnabled(false);
     }
@@ -252,28 +280,80 @@ private:
                 return;
             }
 
-            competition_->clear();
-            for (const auto& item : body) {
-                const auto competition = item.toObject();
-                competition_->addItem(competition.value("name").toString(), competition);
+            {
+                QSignalBlocker blocker(competition_);
+                competition_->clear();
+                for (const auto& item : body) {
+                    const auto competition = item.toObject();
+                    competition_->addItem(competition.value("name").toString(), competition);
+                }
             }
             if (competition_->count() == 0) {
                 competition_->addItem("No competitions yet");
                 competition_->setEnabled(false);
-                table_->clear();
-                table_->addItem("Create a new game first");
-                table_->setEnabled(false);
+                {
+                    QSignalBlocker blocker(table_);
+                    table_->clear();
+                    table_->addItem("Create a new game first");
+                    table_->setEnabled(false);
+                }
+                pokerTable_->clearPlayers();
                 return;
             }
             competition_->setEnabled(true);
             if (!preferredName.isEmpty()) {
                 const auto index = competition_->findText(preferredName);
-                if (index >= 0) competition_->setCurrentIndex(index);
+                if (index >= 0) {
+                    QSignalBlocker blocker(competition_);
+                    competition_->setCurrentIndex(index);
+                }
             }
-            table_->clear();
-            table_->addItem("Table selection coming next");
-            table_->setEnabled(false);
+            refreshTables();
         });
+    }
+
+    void refreshTables() {
+        if (!connected_ || competition_->currentIndex() < 0) return;
+        const auto competitionName = competition_->currentText();
+        if (competitionName.isEmpty()) return;
+        const auto attempt = connectionGeneration_;
+        const auto tableRequest = ++tableRequestGeneration_;
+        const auto path = "/v1/competitions/" + competitionName + "/tables";
+        auto* reply = track(network_.get(QNetworkRequest(endpointUrl(path))));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, tableRequest] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto tables = QJsonDocument::fromJson(reply->readAll()).array();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (attempt != connectionGeneration_ || tableRequest != tableRequestGeneration_ || !connected_) return;
+            if (!success) {
+                QSignalBlocker blocker(table_);
+                table_->clear();
+                table_->addItem("Could not retrieve tables");
+                table_->setEnabled(false);
+                pokerTable_->clearPlayers();
+                return;
+            }
+            {
+                QSignalBlocker blocker(table_);
+                table_->clear();
+                for (const auto& item : tables) {
+                    const auto table = item.toObject();
+                    table_->addItem(table.value("name").toString(), table);
+                }
+                table_->setEnabled(table_->count() > 0);
+            }
+            refreshSeats();
+        });
+    }
+
+    void refreshSeats() {
+        if (table_->currentIndex() < 0) {
+            pokerTable_->clearPlayers();
+            return;
+        }
+        const auto table = table_->currentData().toJsonObject();
+        pokerTable_->setPlayers(table.value("players").toArray());
     }
 
     void newGame() {
@@ -326,10 +406,12 @@ private:
     QNetworkReply* healthReply_{};
     QUrl serverUrl_;
     std::uint64_t connectionGeneration_{};
+    std::uint64_t tableRequestGeneration_{};
     bool connected_{};
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};
+    PokerTable* pokerTable_{};
     QAction* disconnectAction_{};
     QAction* newGameAction_{};
 };

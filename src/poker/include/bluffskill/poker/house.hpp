@@ -21,7 +21,12 @@ struct TournamentSpec {
 
 struct TableSummary {
     std::string name;
-    std::size_t seats{0};
+    std::size_t maximumSeats{0};
+    struct SeatedPlayer {
+        PlayerSummary player;
+        std::size_t seat{0}; // One-based table seat number.
+    };
+    std::vector<SeatedPlayer> players;
 };
 
 struct CompetitionSummary {
@@ -29,7 +34,6 @@ struct CompetitionSummary {
     CompetitionStyle style{CompetitionStyle::tournament};
     TournamentSpec tournament;
     std::vector<TableSummary> tables;
-    std::vector<PlayerSummary> players;
 };
 
 class House {
@@ -43,7 +47,12 @@ public:
 private:
     struct Competition {
         CompetitionSummary summary;
-        std::vector<std::unique_ptr<Player>> players;
+        struct SeatedPlayer {
+            std::unique_ptr<Player> player;
+            std::size_t tableIndex{0};
+            std::size_t seat{0};
+        };
+        std::vector<SeatedPlayer> players;
     };
 
     [[nodiscard]] Competition& findCompetition(std::string_view name);
