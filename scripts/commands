@@ -7,7 +7,7 @@ alias build='cd $REPO && cmake --build build --parallel && cd -'
 alias server='$REPO/build/apps/server/bluffskill-server'
 alias client='$REPO/build/apps/client/bluffskill-client'
 
-function build-mac-bundles {
+function mac-build {
   cmake --build "$REPO/build" --target build-mac-bundles
 }
 

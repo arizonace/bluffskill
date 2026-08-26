@@ -166,7 +166,10 @@ CompetitionSummary House::createApiPlayer(std::string_view competitionName, std:
     const auto& player = competition.players.back();
     auto& table = *competition.tables.at(tableIndex);
     table.seatPlayer(player.player->name(), player.player->kind(), *seat, static_cast<Chips>(competition.summary.tournament.startingStack));
-    if (table.viewFor().street == Street::waiting) table.startHand();
+    if (table.viewFor().street == Street::waiting) {
+        table.startHand();
+        advanceReferencePlayers(competition, tableIndex);
+    }
     return summaryOf(competition);
 }
 
@@ -203,7 +206,31 @@ TableView House::tableView(std::string_view competitionName, std::string_view ta
 
 void House::submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
     Action action, Chips amount, std::uint64_t expectedSequence) {
-    findTable(findCompetition(competitionName), tableName).submitAction(playerName, action, amount, expectedSequence);
+    auto& competition = findCompetition(competitionName);
+    const auto tableIndex = findTableIndex(competition, tableName);
+    competition.tables.at(tableIndex)->submitAction(playerName, action, amount, expectedSequence);
+    advanceReferencePlayers(competition, tableIndex);
+}
+
+void House::advanceReferencePlayers(Competition& competition, std::size_t tableIndex) {
+    auto& table = *competition.tables.at(tableIndex);
+    // A valid no-limit hand has a finite stack of actions. The guard makes a broken
+    // policy fail loudly rather than consuming the server event loop indefinitely.
+    for (std::size_t steps = 0; steps < 10'000; ++steps) {
+        const auto publicView = table.viewFor();
+        if (!publicView.actingSeat) return;
+        const auto actor = std::ranges::find_if(competition.players, [tableIndex, seat = *publicView.actingSeat](const auto& player) {
+            return player.tableIndex == tableIndex && player.seat == seat;
+        });
+        if (actor == competition.players.end()) throw std::logic_error("the acting seat has no player identity");
+        if (actor->player->kind() != PlayerKind::reference) return;
+
+        const auto& referencePlayer = static_cast<const ReferencePlayer&>(*actor->player);
+        const auto privateView = table.viewFor(referencePlayer.name());
+        const auto decision = referencePlayer.chooseResponse(privateView, random_);
+        table.submitAction(referencePlayer.name(), decision.action, decision.amount, privateView.eventSequence);
+    }
+    throw std::logic_error("reference-player policy exceeded the automated-action limit");
 }
 
 } // namespace bluffskill::poker

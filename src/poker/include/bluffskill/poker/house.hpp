@@ -71,6 +71,7 @@ private:
     [[nodiscard]] const Table& findTable(const Competition& competition, std::string_view tableName) const;
     [[nodiscard]] std::optional<std::size_t> firstFreeSeat(const Competition& competition, std::size_t tableIndex) const;
     void validatePlayerName(const Competition& competition, std::string_view name) const;
+    void advanceReferencePlayers(Competition& competition, std::size_t tableIndex);
 
     std::mt19937_64 random_{std::random_device{}()};
     std::vector<Competition> competitions_;
