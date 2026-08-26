@@ -40,8 +40,10 @@ curl --request POST http://127.0.0.1:53153/v1/competitions/Valhalla/reference-pl
 Action request example:
 
 ```json
-{ "action": "raise", "amount": 500, "expectedSequence": 41 }
+{ "player": "Arizona", "action": "raise", "amount": 500, "expectedSequence": 41 }
 ```
+
+The action request also carries the API-player name in this unauthenticated scaffold. `amount` is an integer chip amount and, for a bet or raise, is the player's **total commitment in the current betting round**, not an additional increment. Check, call, and fold use `0`. A real authenticated adapter derives the player identity from its credential rather than accepting that field from the request body.
 
 The action endpoint returns `400` for invalid syntax, `401/403` for authentication/authorization failure, `409` for a stale sequence or turn conflict, and `422` for a syntactically valid but illegal poker action.
 

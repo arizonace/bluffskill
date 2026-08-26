@@ -21,9 +21,27 @@ QString HumanPlayer::displayName(HumanAction action) {
     case HumanAction::check: return "Check";
     case HumanAction::call: return "Call";
     case HumanAction::bet: return "Bet";
+    case HumanAction::raise: return "Raise";
     case HumanAction::fold: return "Fold";
     }
     return "Unknown";
+}
+
+QNetworkReply* HumanPlayer::submitAction(
+    QNetworkAccessManager& network,
+    const QUrl& serverUrl,
+    const QString& competitionName,
+    const QString& tableName,
+    HumanAction action,
+    qint64 amount,
+    qint64 expectedSequence) const {
+    auto endpoint = serverUrl;
+    endpoint.setPath("/v1/competitions/" + competitionName + "/tables/" + tableName + "/actions");
+    QNetworkRequest request(endpoint);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QString actionName = displayName(action).toLower();
+    return network.post(request, QJsonDocument(QJsonObject{{"player", apiPlayerName_}, {"action", actionName},
+        {"amount", amount}, {"expectedSequence", expectedSequence}}).toJson(QJsonDocument::Compact));
 }
 
 QNetworkReply* HumanPlayer::attachToTable(

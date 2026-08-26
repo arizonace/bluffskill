@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bluffskill/poker/player.hpp"
+#include "bluffskill/poker/table.hpp"
 
 #include <cstddef>
 #include <memory>
@@ -44,6 +45,9 @@ public:
     [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
     [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
+    [[nodiscard]] TableView tableView(std::string_view competitionName, std::string_view tableName, std::string_view viewerName = {}) const;
+    void submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
+        Action action, Chips amount, std::uint64_t expectedSequence);
 
 private:
     struct Competition {
@@ -54,6 +58,7 @@ private:
             std::size_t seat{0};
         };
         std::vector<SeatedPlayer> players;
+        std::vector<std::unique_ptr<Table>> tables;
     };
 
     [[nodiscard]] Competition& findCompetition(std::string_view name);
@@ -62,6 +67,8 @@ private:
     [[nodiscard]] std::string nextCompetitionName() const;
     [[nodiscard]] std::string nextReferencePlayerName(const Competition& competition);
     [[nodiscard]] std::size_t findTableIndex(const Competition& competition, std::string_view tableName) const;
+    [[nodiscard]] Table& findTable(Competition& competition, std::string_view tableName);
+    [[nodiscard]] const Table& findTable(const Competition& competition, std::string_view tableName) const;
     [[nodiscard]] std::optional<std::size_t> firstFreeSeat(const Competition& competition, std::size_t tableIndex) const;
     void validatePlayerName(const Competition& competition, std::string_view name) const;
 

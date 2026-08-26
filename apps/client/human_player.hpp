@@ -10,7 +10,7 @@ class QUrl;
 
 namespace bluffskill::client {
 
-enum class HumanAction { check, call, bet, fold };
+enum class HumanAction { check, call, bet, raise, fold };
 
 // A local, human-operated controller. Its attach request intentionally contains no human-specific data.
 class HumanPlayer final {
@@ -26,6 +26,14 @@ public:
         const QUrl& serverUrl,
         const QString& competitionName,
         const QString& tableName) const;
+    [[nodiscard]] QNetworkReply* submitAction(
+        QNetworkAccessManager& network,
+        const QUrl& serverUrl,
+        const QString& competitionName,
+        const QString& tableName,
+        HumanAction action,
+        qint64 amount,
+        qint64 expectedSequence) const;
 
 private:
     QString apiPlayerName_;

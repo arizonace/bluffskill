@@ -5,3 +5,7 @@ add_test(NAME cards_smoke_test COMMAND cards_smoke_test)
 add_executable(house_smoke_test house_smoke_test.cpp)
 target_link_libraries(house_smoke_test PRIVATE bluffskill_poker)
 add_test(NAME house_smoke_test COMMAND house_smoke_test)
+
+add_executable(table_state_test table_state_test.cpp)
+target_link_libraries(table_state_test PRIVATE bluffskill_poker)
+add_test(NAME table_state_test COMMAND table_state_test)

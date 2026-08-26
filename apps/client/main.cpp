@@ -24,11 +24,14 @@
 #include <QStatusBar>
 #include <QSet>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVBoxLayout>
 #include <QLineEdit>
 
 #include <memory>
+#include <algorithm>
 #include <vector>
 
 namespace {
@@ -39,6 +42,9 @@ public:
 
     void setPlayers(const QJsonArray& players) {
         playerNames_.fill({});
+        playerStacks_.fill(0);
+        playerActing_.fill(false);
+        playerDealer_.fill(false);
         for (const auto& item : players) {
             const auto player = item.toObject();
             const auto seat = player.value("seat").toInt();
@@ -51,6 +57,35 @@ public:
 
     void clearPlayers() {
         playerNames_.fill({});
+        playerStacks_.fill(0);
+        playerActing_.fill(false);
+        playerDealer_.fill(false);
+        centerText_ = "POT  0\n\nCommunity cards will appear here";
+        update();
+    }
+
+    void setTableView(const QJsonObject& table) {
+        playerNames_.fill({});
+        playerStacks_.fill(0);
+        playerActing_.fill(false);
+        playerDealer_.fill(false);
+        for (const auto& item : table.value("players").toArray()) {
+            const auto player = item.toObject();
+            const auto seat = player.value("seat").toInt();
+            if (seat >= 1 && seat <= static_cast<int>(playerNames_.size())) {
+                const auto index = static_cast<std::size_t>(seat - 1);
+                playerNames_[index] = player.value("name").toString();
+                playerStacks_[index] = player.value("stack").toInteger();
+                playerActing_[index] = player.value("acting").toBool();
+                playerDealer_[index] = player.value("dealer").toBool();
+            }
+        }
+        qint64 pot = 0;
+        for (const auto& item : table.value("pots").toArray()) pot += item.toObject().value("amount").toInteger();
+        QStringList cards;
+        for (const auto& card : table.value("communityCards").toArray()) cards.append(card.toString());
+        centerText_ = "POT  " + QString::number(pot) + "\n" + table.value("street").toString()
+            + "\n" + (cards.isEmpty() ? "Community cards will appear here" : cards.join("  "));
         update();
     }
 
@@ -70,7 +105,7 @@ protected:
         painter.drawRoundedRect(felt, 170, 170);
         painter.setPen(Qt::white);
         painter.setFont(QFont("Helvetica", 18, QFont::DemiBold));
-        painter.drawText(felt, Qt::AlignCenter, "POT  0\n\nCommunity cards will appear here");
+        painter.drawText(felt, Qt::AlignCenter, centerText_);
         constexpr std::array<QPointF, 8> seats{{{.25, .10}, {.50, .07}, {.75, .10}, {.93, .50}, {.75, .90}, {.50, .93}, {.25, .90}, {.07, .50}}};
         painter.setFont(QFont("Helvetica", 12));
         for (std::size_t i = 0; i < seats.size(); ++i) {
@@ -81,14 +116,19 @@ protected:
             painter.drawEllipse(point, 43, 43);
             const auto label = playerNames_[i].isEmpty()
                 ? "Seat " + QString::number(i + 1)
-                : playerNames_[i] + "\nSeat " + QString::number(i + 1);
+                : playerNames_[i] + "\n" + QString::number(playerStacks_[i]) + " chips"
+                    + (playerDealer_[i] ? "  Dealer" : "") + (playerActing_[i] ? "  Acting" : "");
             painter.drawText(QRectF(point.x() - 58, point.y() - 20, 116, 40), Qt::AlignCenter, label);
         }
     }
 
 private:
     std::array<QString, 8> playerNames_{};
+    std::array<qint64, 8> playerStacks_{};
+    std::array<bool, 8> playerActing_{};
+    std::array<bool, 8> playerDealer_{};
     QString localPlayerName_;
+    QString centerText_{"POT  0\n\nCommunity cards will appear here"};
 };
 
 class ConnectionDialog final : public QDialog {
@@ -159,7 +199,12 @@ public:
         auto* actionLayout = new QHBoxLayout(actions);
         actionStatus_ = new QLabel("No human player is attached.", actions);
         actionLayout->addWidget(actionStatus_);
-        for (const auto* action : {"Check", "Call", "Bet", "Fold"}) {
+        amount_ = new QSpinBox(actions);
+        amount_->setRange(0, 1000000000);
+        amount_->setPrefix("Total commitment: ");
+        amount_->setEnabled(false);
+        actionLayout->addWidget(amount_);
+        for (const auto* action : {"Check", "Call", "Bet", "Raise", "Fold"}) {
             auto* button = new QPushButton(action, actions);
             button->setEnabled(false);
             actionButtons_.push_back(button);
@@ -204,6 +249,14 @@ private:
         QNetworkRequest request(endpointUrl(path));
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         return track(network_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
+    }
+
+    [[nodiscard]] QUrl tableViewUrl() const {
+        auto url = endpointUrl("/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText() + "/view");
+        QUrlQuery query;
+        if (humanPlayer_) query.addQueryItem("viewer", humanPlayer_->apiPlayerName());
+        url.setQuery(query);
+        return url;
     }
 
     void resetDisconnectedUi() {
@@ -373,6 +426,50 @@ private:
         }
         const auto table = table_->currentData().toJsonObject();
         pokerTable_->setPlayers(table.value("players").toArray());
+        refreshTableView();
+    }
+
+    void refreshTableView() {
+        if (!connected_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        const auto attempt = connectionGeneration_;
+        const auto requestGeneration = ++tableViewRequestGeneration_;
+        auto* reply = track(network_.get(QNetworkRequest(tableViewUrl())));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, requestGeneration] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto view = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (attempt != connectionGeneration_ || requestGeneration != tableViewRequestGeneration_ || !connected_) return;
+            if (!success) {
+                setActionControlsEnabled(false);
+                actionStatus_->setText("Could not retrieve the current table state.");
+                return;
+            }
+            applyTableView(view);
+        });
+    }
+
+    void applyTableView(const QJsonObject& view) {
+        pokerTable_->setTableView(view);
+        tableSequence_ = view.value("sequence").toInteger();
+        const auto legal = view.value("legalActions").toObject();
+        bool anyAction = false;
+        for (auto* button : actionButtons_) {
+            const auto enabled = humanPlayer_ && legal.value(button->text().toLower()).toBool();
+            button->setEnabled(enabled);
+            anyAction = anyAction || enabled;
+        }
+        const auto minimum = legal.value("minimumAmount").toInteger();
+        const auto maximum = legal.value("maximumAmount").toInteger();
+        const auto canSetAmount = humanPlayer_ && (legal.value("bet").toBool() || legal.value("raise").toBool()) && maximum >= minimum;
+        amount_->setEnabled(canSetAmount);
+        if (canSetAmount) {
+            amount_->setRange(static_cast<int>(std::min<qint64>(minimum, 1000000000)), static_cast<int>(std::min<qint64>(maximum, 1000000000)));
+            amount_->setValue(static_cast<int>(std::min<qint64>(minimum, 1000000000)));
+        }
+        if (!humanPlayer_) actionStatus_->setText("Choose a local player through New Game to view private cards and act.");
+        else if (anyAction) actionStatus_->setText("Your turn. Select one of the server-approved actions.");
+        else actionStatus_->setText("Waiting for " + view.value("actingSeat").toVariant().toString() + " to act.");
     }
 
     void newGame() {
@@ -447,8 +544,8 @@ private:
             }
             humanPlayer_ = std::move(pendingHumanPlayer_);
             pokerTable_->setLocalPlayerName(humanPlayer_->apiPlayerName());
-            setActionControlsEnabled(true);
-            actionStatus_->setText("You are " + humanPlayer_->apiPlayerName() + ". Choose an action when it is your turn.");
+            setActionControlsEnabled(false);
+            actionStatus_->setText("You are " + humanPlayer_->apiPlayerName() + ". Retrieving your private table view…");
             statusBar()->showMessage("Created " + competitionName + " with six reference players and " + humanPlayer_->apiPlayerName() + ".");
             refreshCompetitions(competitionName);
         });
@@ -460,10 +557,34 @@ private:
         const auto humanAction = action == "Check" ? bluffskill::client::HumanAction::check
             : action == "Call" ? bluffskill::client::HumanAction::call
             : action == "Bet" ? bluffskill::client::HumanAction::bet
+            : action == "Raise" ? bluffskill::client::HumanAction::raise
             : bluffskill::client::HumanAction::fold;
         humanPlayer_->selectAction(humanAction);
-        actionStatus_->setText(humanPlayer_->apiPlayerName() + " selected " + bluffskill::client::HumanPlayer::displayName(humanAction) + ".");
-        statusBar()->showMessage("Action selected locally; it will be submitted when the server provides a legal action turn.");
+        if (competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        const auto amount = humanAction == bluffskill::client::HumanAction::bet || humanAction == bluffskill::client::HumanAction::raise
+            ? amount_->value() : 0;
+        setActionControlsEnabled(false);
+        amount_->setEnabled(false);
+        actionStatus_->setText("Submitting " + bluffskill::client::HumanPlayer::displayName(humanAction) + "…");
+        const auto attempt = connectionGeneration_;
+        auto* reply = track(humanPlayer_->submitAction(network_, serverUrl_, competition_->currentText(), table_->currentText(), humanAction,
+            amount, tableSequence_));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto response = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            if (!success) {
+                const auto detail = response.value("error").toString("The server rejected the action.");
+                actionStatus_->setText(detail);
+                statusBar()->showMessage("Action was not accepted; refreshing the table.");
+                refreshTableView();
+                return;
+            }
+            applyTableView(response);
+            statusBar()->showMessage("Action accepted by the server.");
+        });
     }
 
     void setActionControlsEnabled(bool enabled) {
@@ -475,6 +596,8 @@ private:
         humanPlayer_.reset();
         pokerTable_->setLocalPlayerName({});
         setActionControlsEnabled(false);
+        amount_->setEnabled(false);
+        tableSequence_ = 0;
         actionStatus_->setText("No human player is attached.");
     }
 
@@ -485,12 +608,15 @@ private:
     QUrl serverUrl_;
     std::uint64_t connectionGeneration_{};
     std::uint64_t tableRequestGeneration_{};
+    std::uint64_t tableViewRequestGeneration_{};
+    qint64 tableSequence_{};
     bool connected_{};
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};
     PokerTable* pokerTable_{};
     QLabel* actionStatus_{};
+    QSpinBox* amount_{};
     std::vector<QPushButton*> actionButtons_;
     QAction* disconnectAction_{};
     QAction* newGameAction_{};

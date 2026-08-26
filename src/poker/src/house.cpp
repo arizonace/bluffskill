@@ -39,7 +39,10 @@ CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
         .tournament = spec,
         .tables = {{.name = "Red", .maximumSeats = spec.maximumPlayers}},
     };
-    competitions_.push_back({.summary = std::move(summary)});
+    Competition competition{.summary = std::move(summary)};
+    competition.tables.push_back(std::make_unique<Table>(competition.summary.tables.front().name,
+        competition.summary.tables.front().maximumSeats, static_cast<Chips>(spec.startingStack)));
+    competitions_.push_back(std::move(competition));
     return summaryOf(competitions_.back());
 }
 
@@ -81,6 +84,14 @@ std::size_t House::findTableIndex(const Competition& competition, std::string_vi
     });
     if (found == competition.summary.tables.end()) throw std::invalid_argument("table was not found");
     return static_cast<std::size_t>(std::distance(competition.summary.tables.begin(), found));
+}
+
+Table& House::findTable(Competition& competition, std::string_view tableName) {
+    return *competition.tables.at(findTableIndex(competition, tableName));
+}
+
+const Table& House::findTable(const Competition& competition, std::string_view tableName) const {
+    return *competition.tables.at(findTableIndex(competition, tableName));
 }
 
 std::optional<std::size_t> House::firstFreeSeat(const Competition& competition, std::size_t tableIndex) const {
@@ -125,8 +136,9 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
             seat = firstFreeSeat(competition, tableIndex);
         }
         if (!seat) throw std::runtime_error("could not find a free seat");
+        const auto playerName = nextReferencePlayerName(competition);
         competition.players.push_back({
-            .player = std::make_unique<ReferencePlayer>(nextReferencePlayerName(competition), ReferencePlayerProfile{
+            .player = std::make_unique<ReferencePlayer>(playerName, ReferencePlayerProfile{
                 .riskTolerance = disposition(random_),
                 .optimism = disposition(random_),
                 .variability = disposition(random_),
@@ -134,6 +146,8 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
             .tableIndex = tableIndex - 1,
             .seat = *seat,
         });
+        competition.tables.at(tableIndex - 1)->seatPlayer(playerName, PlayerKind::reference, *seat,
+            static_cast<Chips>(competition.summary.tournament.startingStack));
     }
     return summaryOf(competition);
 }
@@ -149,6 +163,10 @@ CompetitionSummary House::createApiPlayer(std::string_view competitionName, std:
         .tableIndex = tableIndex,
         .seat = *seat,
     });
+    const auto& player = competition.players.back();
+    auto& table = *competition.tables.at(tableIndex);
+    table.seatPlayer(player.player->name(), player.player->kind(), *seat, static_cast<Chips>(competition.summary.tournament.startingStack));
+    if (table.viewFor().street == Street::waiting) table.startHand();
     return summaryOf(competition);
 }
 
@@ -175,6 +193,17 @@ std::optional<CompetitionSummary> House::competition(std::string_view name) cons
     const auto* found = findCompetition(name);
     if (found == nullptr) return std::nullopt;
     return summaryOf(*found);
+}
+
+TableView House::tableView(std::string_view competitionName, std::string_view tableName, std::string_view viewerName) const {
+    const auto* competition = findCompetition(competitionName);
+    if (competition == nullptr) throw std::invalid_argument("competition was not found");
+    return findTable(*competition, tableName).viewFor(viewerName);
+}
+
+void House::submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
+    Action action, Chips amount, std::uint64_t expectedSequence) {
+    findTable(findCompetition(competitionName), tableName).submitAction(playerName, action, amount, expectedSequence);
 }
 
 } // namespace bluffskill::poker
