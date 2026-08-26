@@ -6,6 +6,7 @@
 #include <QFormLayout>
 #include <QFrame>
 #include <QIntValidator>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -18,6 +19,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QStatusBar>
+#include <QSet>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QLineEdit>
@@ -79,11 +81,15 @@ public:
     }
 
     [[nodiscard]] QUrl healthUrl() const {
+        return serverUrl("/v1/health");
+    }
+
+    [[nodiscard]] QUrl serverUrl(const QString& path = "/") const {
         QUrl url;
         url.setScheme("http"); // The prototype server is intentionally localhost HTTP only.
         url.setHost(host_->text().trimmed());
         url.setPort(port_->text().toInt());
-        url.setPath("/v1/health");
+        url.setPath(path);
         return url;
     }
 
@@ -119,54 +125,213 @@ public:
         }
         layout->addWidget(actions);
         setCentralWidget(central);
-        auto* connectAction = menuBar()->addMenu("Connection")->addAction("Connect…");
+        auto* connectionMenu = menuBar()->addMenu("Connection");
+        auto* connectAction = connectionMenu->addAction("Connect…");
+        disconnectAction_ = connectionMenu->addAction("Disconnect");
+        disconnectAction_->setEnabled(false);
         connect(connectAction, &QAction::triggered, this, [this] { connectToServer(); });
+        connect(disconnectAction_, &QAction::triggered, this, [this] { disconnectFromServer(); });
+        auto* gameMenu = menuBar()->addMenu("Game");
+        newGameAction_ = gameMenu->addAction("New Game…");
+        newGameAction_->setEnabled(false);
+        connect(newGameAction_, &QAction::triggered, this, [this] { newGame(); });
         statusBar()->showMessage("Choose Connection → Connect… to begin.");
     }
 
 private:
+    [[nodiscard]] QNetworkReply* track(QNetworkReply* reply) {
+        activeReplies_.insert(reply);
+        return reply;
+    }
+
+    void release(QNetworkReply* reply) {
+        activeReplies_.remove(reply);
+        reply->deleteLater();
+    }
+
+    [[nodiscard]] QUrl endpointUrl(const QString& path) const {
+        auto url = serverUrl_;
+        url.setPath(path);
+        return url;
+    }
+
+    [[nodiscard]] QNetworkReply* postJson(const QString& path, const QJsonObject& body) {
+        QNetworkRequest request(endpointUrl(path));
+        request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+        return track(network_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
+    }
+
+    void resetDisconnectedUi() {
+        server_->clear();
+        server_->addItem("Not connected");
+        server_->setEnabled(false);
+        competition_->clear();
+        competition_->addItem("Choose a server first");
+        competition_->setEnabled(false);
+        table_->clear();
+        table_->addItem("Choose a competition first");
+        table_->setEnabled(false);
+        disconnectAction_->setEnabled(false);
+        newGameAction_->setEnabled(false);
+    }
+
     void connectToServer() {
         ConnectionDialog dialog(this);
         if (dialog.exec() != QDialog::Accepted) return;
 
         const auto address = dialog.displayAddress();
+        const auto attempt = ++connectionGeneration_;
+        if (healthReply_) healthReply_->abort();
+        newGameAction_->setEnabled(false);
         statusBar()->showMessage("Connecting to " + address + "…");
-        auto* reply = network_.get(QNetworkRequest(dialog.healthUrl()));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, address] {
+        auto* reply = track(network_.get(QNetworkRequest(dialog.healthUrl())));
+        healthReply_ = reply;
+        connect(reply, &QNetworkReply::finished, this, [this, reply, address, baseUrl = dialog.serverUrl(), attempt] {
+            if (healthReply_ == reply) healthReply_ = nullptr;
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const auto response = reply->readAll();
             const auto body = QJsonDocument::fromJson(response).object();
             const auto connected = reply->error() == QNetworkReply::NoError && status == 200
                 && body.value("status") == "ok";
             const auto error = reply->errorString();
-            reply->deleteLater();
+            release(reply);
+
+            // A newer connect or disconnect request made this reply irrelevant.
+            if (attempt != connectionGeneration_) return;
 
             if (!connected) {
                 statusBar()->showMessage("Could not connect to " + address);
                 const auto detail = status > 0 ? "The server returned HTTP " + QString::number(status) + "." : error;
                 QMessageBox::warning(this, "Server unavailable",
                     "BluffSkill could not verify the server at " + address + ".\n\n" + detail);
+                newGameAction_->setEnabled(connected_);
                 return;
             }
 
+            connected_ = true;
+            serverUrl_ = baseUrl;
             server_->setEnabled(true);
             server_->clear();
             server_->addItem(address);
-            competition_->clear();
-            competition_->addItem("Competition list coming next");
-            competition_->setEnabled(false);
-            table_->clear();
-            table_->addItem("Choose a competition first");
-            table_->setEnabled(false);
+            disconnectAction_->setEnabled(true);
+            newGameAction_->setEnabled(true);
             statusBar()->showMessage("Connected to " + address);
+            refreshCompetitions();
+        });
+    }
+
+    void disconnectFromServer() {
+        ++connectionGeneration_;
+        const auto replies = activeReplies_;
+        for (auto* reply : replies) reply->abort();
+        activeReplies_.clear();
+        healthReply_ = nullptr;
+        network_.clearAccessCache();
+        network_.clearConnectionCache();
+        connected_ = false;
+        serverUrl_ = QUrl{};
+        resetDisconnectedUi();
+        statusBar()->showMessage("Disconnected.");
+    }
+
+    void refreshCompetitions(const QString& preferredName = {}) {
+        if (!connected_) return;
+        const auto attempt = connectionGeneration_;
+        auto* reply = track(network_.get(QNetworkRequest(endpointUrl("/v1/competitions"))));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, preferredName] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto body = QJsonDocument::fromJson(reply->readAll()).array();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            if (!success) {
+                competition_->clear();
+                competition_->addItem("Could not retrieve competitions");
+                competition_->setEnabled(false);
+                statusBar()->showMessage("Connected, but competitions could not be retrieved.");
+                return;
+            }
+
+            competition_->clear();
+            for (const auto& item : body) {
+                const auto competition = item.toObject();
+                competition_->addItem(competition.value("name").toString(), competition);
+            }
+            if (competition_->count() == 0) {
+                competition_->addItem("No competitions yet");
+                competition_->setEnabled(false);
+                table_->clear();
+                table_->addItem("Create a new game first");
+                table_->setEnabled(false);
+                return;
+            }
+            competition_->setEnabled(true);
+            if (!preferredName.isEmpty()) {
+                const auto index = competition_->findText(preferredName);
+                if (index >= 0) competition_->setCurrentIndex(index);
+            }
+            table_->clear();
+            table_->addItem("Table selection coming next");
+            table_->setEnabled(false);
+        });
+    }
+
+    void newGame() {
+        if (!connected_) return;
+        const auto attempt = connectionGeneration_;
+        newGameAction_->setEnabled(false);
+        statusBar()->showMessage("Creating a six-player reference tournament…");
+        auto* reply = postJson("/v1/competitions", QJsonObject{
+            {"flavor", "NoLimitTexasHoldEm"},
+            {"maximumPlayers", 8},
+            {"startingStack", 7000},
+        });
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto competition = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 201;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            if (!success) {
+                QMessageBox::warning(this, "New game failed", "The server could not create a new competition.");
+                newGameAction_->setEnabled(true);
+                return;
+            }
+            addReferencePlayers(competition.value("name").toString(), attempt);
+        });
+    }
+
+    void addReferencePlayers(const QString& competitionName, std::uint64_t attempt) {
+        const auto path = "/v1/competitions/" + competitionName + "/reference-players";
+        auto* reply = postJson(path, QJsonObject{{"count", 6}});
+        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 201;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            newGameAction_->setEnabled(true);
+            if (!success) {
+                QMessageBox::warning(this, "Reference players failed", "The competition was created, but its six reference players were not added.");
+                refreshCompetitions(competitionName);
+                return;
+            }
+            statusBar()->showMessage("Created " + competitionName + " with six reference players.");
+            refreshCompetitions(competitionName);
         });
     }
 
 private:
     QNetworkAccessManager network_{this};
+    QSet<QNetworkReply*> activeReplies_;
+    QNetworkReply* healthReply_{};
+    QUrl serverUrl_;
+    std::uint64_t connectionGeneration_{};
+    bool connected_{};
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};
+    QAction* disconnectAction_{};
+    QAction* newGameAction_{};
 };
 
 } // namespace

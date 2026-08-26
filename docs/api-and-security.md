@@ -2,7 +2,7 @@
 
 ## Prototype endpoints
 
-All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they are scoped to a competition. The routes below are the intended contract; the present scaffold implements only health and competition creation.
+All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they are scoped to a competition. The current prototype implements health, competition listing/creation, and reference-player creation.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -18,6 +18,18 @@ Creation request example:
 
 ```json
 { "flavor": "NoLimitTexasHoldEm", "maximumPlayers": 8, "startingStack": 7000 }
+```
+
+For a locally running server at port `53153`, these commands list competitions, create one, then add six reference players. `POST /v1/competitions` creates; it never lists.
+
+```sh
+curl http://127.0.0.1:53153/v1/competitions
+curl --request POST http://127.0.0.1:53153/v1/competitions \
+  --header 'Content-Type: application/json' \
+  --data '{"flavor":"NoLimitTexasHoldEm","maximumPlayers":8,"startingStack":7000}'
+curl --request POST http://127.0.0.1:53153/v1/competitions/Valhalla/reference-players \
+  --header 'Content-Type: application/json' \
+  --data '{"count":6}'
 ```
 
 Action request example:
