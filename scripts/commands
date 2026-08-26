@@ -1,0 +1,8 @@
+export REPO=$BLUFFSKILL/repos/bluffskill
+export SCRIPTS=$REPO/scripts
+export COMMANDS=$SCRIPTS/commands
+alias commands='source $COMMANDS'
+
+alias build='cd $REPO && cmake --build build --parallel && cd -'
+alias server='$REPO/build/apps/server/bluffskill-server'
+alias client='$REPO/build/apps/client/bluffskill-client'
