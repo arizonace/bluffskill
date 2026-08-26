@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -37,6 +38,7 @@ public:
     [[nodiscard]] CompetitionSummary createSingleTableTournament(TournamentSpec spec);
     [[nodiscard]] CompetitionSummary createReferencePlayers(std::string_view competitionName, std::size_t count);
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
+    [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
 
 private:
     struct Competition {
@@ -45,6 +47,7 @@ private:
     };
 
     [[nodiscard]] Competition& findCompetition(std::string_view name);
+    [[nodiscard]] const Competition* findCompetition(std::string_view name) const;
     [[nodiscard]] CompetitionSummary summaryOf(const Competition& competition) const;
     [[nodiscard]] std::string nextCompetitionName() const;
     [[nodiscard]] std::string nextReferencePlayerName(const Competition& competition);

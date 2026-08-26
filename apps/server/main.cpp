@@ -71,6 +71,11 @@ QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competi
             {"referencePlayers", players}};
 }
 
+QJsonObject tableJson(const bluffskill::poker::TableSummary& table) {
+    return {{"name", QString::fromStdString(table.name)},
+            {"seats", static_cast<int>(table.seats)}};
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -105,6 +110,18 @@ int main(int argc, char* argv[]) {
         for (const auto& competition : window.house().competitions()) competitions.append(competitionJson(competition));
         window.log("GET /v1/competitions → 200");
         return QHttpServerResponse(competitions);
+    });
+
+    server.route("/v1/competitions/<arg>/tables", [&window](const QString& competitionName) -> QHttpServerResponse {
+        const auto competition = window.house().competition(competitionName.toStdString());
+        if (!competition) {
+            window.log("GET /v1/competitions/" + competitionName + "/tables → 404");
+            return QHttpServerResponse(QJsonObject{{"error", "competition was not found"}}, QHttpServerResponder::StatusCode::NotFound);
+        }
+        QJsonArray tables;
+        for (const auto& table : competition->tables) tables.append(tableJson(table));
+        window.log("GET /v1/competitions/" + competitionName + "/tables → 200");
+        return QHttpServerResponse(tables);
     });
 
     server.route("/v1/competitions/<arg>/reference-players", QHttpServerRequest::Method::Post,

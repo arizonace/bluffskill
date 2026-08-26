@@ -10,6 +10,7 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 | `POST` | `/v1/competitions/{competition}/reference-players` | add 1–7 in-process bot players |
 | `POST` | `/v1/competitions/{competition}/tables/{table}/players` | attach a human API player |
 | `GET` | `/v1/competitions` | list visible competitions |
+| `GET` | `/v1/competitions/{competition}/tables` | list tables in a competition |
 | `GET` | `/v1/competitions/{competition}/tables/{table}/view` | fetch viewer-projected table state |
 | `POST` | `/v1/competitions/{competition}/tables/{table}/actions` | submit an action |
 | `GET` | `/v1/competitions/{competition}/events` | stream view-projected notifications |

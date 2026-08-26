@@ -51,6 +51,14 @@ House::Competition& House::findCompetition(std::string_view name) {
     return *found;
 }
 
+const House::Competition* House::findCompetition(std::string_view name) const {
+    const auto requested = normalizeName(name);
+    const auto found = std::ranges::find_if(competitions_, [&requested](const Competition& competition) {
+        return normalizeName(competition.summary.name) == requested;
+    });
+    return found == competitions_.end() ? nullptr : &*found;
+}
+
 std::string House::nextReferencePlayerName(const Competition& competition) {
     constexpr std::array animals{"Fox", "Badger", "Otter", "Lynx", "Raven", "Puma", "Marten", "Heron", "Wolf", "Falcon"};
     std::uniform_int_distribution<std::size_t> animal(0, animals.size() - 1);
@@ -98,6 +106,12 @@ std::vector<CompetitionSummary> House::competitions() const {
     summaries.reserve(competitions_.size());
     for (const auto& competition : competitions_) summaries.push_back(summaryOf(competition));
     return summaries;
+}
+
+std::optional<CompetitionSummary> House::competition(std::string_view name) const {
+    const auto* found = findCompetition(name);
+    if (found == nullptr) return std::nullopt;
+    return summaryOf(*found);
 }
 
 } // namespace bluffskill::poker
