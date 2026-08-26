@@ -69,6 +69,7 @@ struct TableView {
     std::string name;
     std::uint64_t eventSequence{0};
     Street street{Street::waiting};
+    Chips currentBet{0}; // Largest commitment in the active betting round.
     std::optional<std::size_t> dealerSeat;
     std::optional<std::size_t> actingSeat;
     std::vector<cards::Card> communityCards;

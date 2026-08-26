@@ -14,9 +14,9 @@ Connection menu → Connect dialog → server field enabled
                player joins → action panel enabled on that player’s turn
 ```
 
-The eight seats use a fixed semantic layout: three top, three bottom, left, and right. A seat presents name, stack, status, dealer button if applicable, an action arrow when active, and a clear local-player ring. The center presents the pot, side pots, community cards, and street. Do not encode state in color alone; provide text labels and accessible names.
+The eight seats use a fixed semantic layout: three top, three bottom, left, and right. A seat presents name, stack, status, dealer button if applicable, an action arrow when active, and a clear local-player ring. The center presents the pot, side pots, current betting-round wager, community cards, and street. Community and local hole cards render as compact rank-and-suit card faces; opponents' hole cards are never rendered. Do not encode state in color alone; provide text labels and accessible names.
 
-Action history is an expandable accessible panel per seat (and a compact hover summary for pointer users). It contains street, action, and amount. The action composer gives only legal action buttons, a formatted amount field, denomination increment/decrement controls, and concise explanations of min/max constraints.
+Action history is an expandable accessible panel per seat (and a compact hover summary for pointer users). It contains street, action, and amount. The action composer gives only legal action buttons, a formatted amount field, denomination increment/decrement controls, and concise explanations of the current wager, call amount, and min/max constraints.
 
 Connection UI accepts host and port, then progressively enables competition and table pickers. It displays a copyable connection URL following `https://host:port[/competition[/table[/player]]]`. The later player segment should appear only after the viewer/player identity is attached.
 

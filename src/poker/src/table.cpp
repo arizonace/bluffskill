@@ -208,7 +208,7 @@ std::vector<PotView> Table::pots() const {
 }
 
 TableView Table::viewFor(std::string_view viewerName) const {
-    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .dealerSeat = dealerSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_, .pots = pots(), .actionHistory = history_};
+    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .currentBet = currentBet_, .dealerSeat = dealerSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_, .pots = pots(), .actionHistory = history_};
     const auto* viewer = seatFor(viewerName);
     for (const auto& seat : seats_) {
         TablePlayerView player{.name = seat.name, .kind = seat.kind, .seat = seat.number, .stack = seat.stack, .committed = seat.handCommitted,

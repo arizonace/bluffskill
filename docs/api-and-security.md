@@ -47,6 +47,8 @@ The action request also carries the API-player name in this unauthenticated scaf
 
 The action endpoint returns `400` for invalid syntax, `401/403` for authentication/authorization failure, `409` for a stale sequence or turn conflict, and `422` for a syntactically valid but illegal poker action.
 
+The viewer-projected table response includes `currentBet`, the largest commitment in the active betting round. When the viewer is acting, `legalActions.callAmount` states the exact additional chips required to call; a client must display these values rather than infer them from another player's stack.
+
 ## Development-only localhost authentication
 
 The prototype may use a random per-server bearer token, printed only in the server console, accepted only on loopback, and reset on every process start. Store it only in the client’s memory. This is a convenience gate, not a security mechanism; it must refuse non-loopback bindings.

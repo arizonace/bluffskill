@@ -14,6 +14,7 @@ int main() {
     const auto publicView = table.viewFor();
     const auto aliceView = table.viewFor("Alice");
     assert(publicView.street == Street::preflop);
+    assert(publicView.currentBet == 100);
     assert(publicView.actingSeat == 1);
     assert(publicView.players.front().holeCards.empty());
     assert(aliceView.players.front().holeCards.size() == 2);
@@ -44,6 +45,7 @@ int main() {
     table.submitAction("BotOne", Action::raise, 200, botOneTurn.eventSequence);
     const auto botTwoTurn = table.viewFor("BotTwo");
     assert(botTwoTurn.actingSeat == 3);
+    assert(botTwoTurn.currentBet == 200);
     assert(botTwoTurn.legalActions && botTwoTurn.legalActions->call);
 
     table.submitAction("BotTwo", Action::call, 0, botTwoTurn.eventSequence);

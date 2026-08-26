@@ -7,6 +7,7 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QIntValidator>
 #include <QInputDialog>
 #include <QJsonArray>
@@ -29,16 +30,21 @@
 #include <QUrlQuery>
 #include <QVBoxLayout>
 #include <QLineEdit>
+#include <QLocale>
 
 #include <memory>
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace {
 
 class PokerTable final : public QWidget {
 public:
-    explicit PokerTable(QWidget* parent = nullptr) : QWidget(parent) { setMinimumSize(900, 520); }
+    explicit PokerTable(QWidget* parent = nullptr) : QWidget(parent) {
+        setMinimumSize(900, 520);
+        setAccessibleName("Poker table");
+    }
 
     void setPlayers(const QJsonArray& players) {
         playerNames_.fill({});
@@ -60,7 +66,11 @@ public:
         playerStacks_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
-        centerText_ = "POT  0\n\nCommunity cards will appear here";
+        pot_ = 0;
+        currentBet_ = 0;
+        street_.clear();
+        communityCards_.clear();
+        localHoleCards_.clear();
         update();
     }
 
@@ -80,17 +90,27 @@ public:
                 playerDealer_[index] = player.value("dealer").toBool();
             }
         }
-        qint64 pot = 0;
-        for (const auto& item : table.value("pots").toArray()) pot += item.toObject().value("amount").toInteger();
-        QStringList cards;
-        for (const auto& card : table.value("communityCards").toArray()) cards.append(card.toString());
-        centerText_ = "POT  " + QString::number(pot) + "\n" + table.value("street").toString()
-            + "\n" + (cards.isEmpty() ? "Community cards will appear here" : cards.join("  "));
+        pot_ = 0;
+        for (const auto& item : table.value("pots").toArray()) pot_ += item.toObject().value("amount").toInteger();
+        currentBet_ = table.value("currentBet").toInteger();
+        street_ = table.value("street").toString();
+        communityCards_.clear();
+        for (const auto& card : table.value("communityCards").toArray()) communityCards_.append(card.toString());
+        localHoleCards_.clear();
+        if (!localPlayerName_.isEmpty()) {
+            for (const auto& item : table.value("players").toArray()) {
+                const auto player = item.toObject();
+                if (player.value("name").toString() != localPlayerName_) continue;
+                for (const auto& card : player.value("holeCards").toArray()) localHoleCards_.append(card.toString());
+                break;
+            }
+        }
         update();
     }
 
     void setLocalPlayerName(QString name) {
         localPlayerName_ = std::move(name);
+        localHoleCards_.clear();
         update();
     }
 
@@ -103,15 +123,18 @@ protected:
         painter.setPen(QPen(QColor("#C8A55B"), 5));
         painter.setBrush(QColor("#256044"));
         painter.drawRoundedRect(felt, 170, 170);
-        painter.setPen(Qt::white);
-        painter.setFont(QFont("Helvetica", 18, QFont::DemiBold));
-        painter.drawText(felt, Qt::AlignCenter, centerText_);
         constexpr std::array<QPointF, 8> seats{{{.25, .10}, {.50, .07}, {.75, .10}, {.93, .50}, {.75, .90}, {.50, .93}, {.25, .90}, {.07, .50}}};
+        QPointF localPoint;
+        bool hasLocalSeat = false;
         painter.setFont(QFont("Helvetica", 12));
         for (std::size_t i = 0; i < seats.size(); ++i) {
             const auto point = QPointF(width() * seats[i].x(), height() * seats[i].y());
             painter.setBrush(QColor("#162D24"));
             const auto localPlayer = !localPlayerName_.isEmpty() && playerNames_[i] == localPlayerName_;
+            if (localPlayer) {
+                localPoint = point;
+                hasLocalSeat = true;
+            }
             painter.setPen(QPen(localPlayer ? QColor("#F6D365") : Qt::white, localPlayer ? 3 : 1));
             painter.drawEllipse(point, 43, 43);
             const auto label = playerNames_[i].isEmpty()
@@ -120,15 +143,94 @@ protected:
                     + (playerDealer_[i] ? "  Dealer" : "") + (playerActing_[i] ? "  Acting" : "");
             painter.drawText(QRectF(point.x() - 58, point.y() - 20, 116, 40), Qt::AlignCenter, label);
         }
+
+        drawBoard(painter, felt);
+        if (hasLocalSeat && !localHoleCards_.isEmpty()) drawHoleCards(painter, felt, localPoint);
     }
 
 private:
+    struct CompactCard {
+        QString rank;
+        QString suit;
+        QColor color;
+    };
+
+    [[nodiscard]] static QString chips(qint64 amount) { return QLocale().toString(amount); }
+
+    [[nodiscard]] static CompactCard compactCard(const QString& description) {
+        const auto pieces = description.split(' ', Qt::SkipEmptyParts);
+        const auto rank = pieces.value(0, "?");
+        const auto suitName = pieces.value(2).toLower();
+        if (suitName == "clubs") return {rank, "♣", QColor("#172018")};
+        if (suitName == "diamonds") return {rank, "♦", QColor("#C82B30")};
+        if (suitName == "hearts") return {rank, "♥", QColor("#C82B30")};
+        if (suitName == "spades") return {rank, "♠", QColor("#172018")};
+        return {rank, "?", QColor("#172018")};
+    }
+
+    static void drawCard(QPainter& painter, const QRectF& cardRect, const QString& description) {
+        const auto card = compactCard(description);
+        painter.save();
+        painter.setPen(QPen(QColor("#C8A55B"), 2));
+        painter.setBrush(QColor("#FFF9EA"));
+        painter.drawRoundedRect(cardRect, 7, 7);
+        painter.setPen(card.color);
+        painter.setFont(QFont("Helvetica", 16, QFont::Bold));
+        painter.drawText(cardRect.adjusted(6, 4, -4, -4), Qt::AlignLeft | Qt::AlignTop, card.rank);
+        painter.setFont(QFont("Helvetica", 34, QFont::DemiBold));
+        painter.drawText(cardRect, Qt::AlignCenter, card.suit);
+        painter.restore();
+    }
+
+    static void drawCardRow(QPainter& painter, const QStringList& cards, QPointF center, qreal width, qreal height) {
+        constexpr qreal gap = 8;
+        const auto totalWidth = cards.size() * width + std::max<qsizetype>(0, cards.size() - 1) * gap;
+        auto left = center.x() - totalWidth / 2.0;
+        for (const auto& card : cards) {
+            drawCard(painter, {left, center.y() - height / 2.0, width, height}, card);
+            left += width + gap;
+        }
+    }
+
+    void drawBoard(QPainter& painter, const QRectF& felt) const {
+        painter.save();
+        painter.setPen(Qt::white);
+        painter.setFont(QFont("Helvetica", 18, QFont::DemiBold));
+        const auto header = "POT  " + chips(pot_) + "\n" + (street_.isEmpty() ? "Waiting" : street_)
+            + "\nCurrent bet: " + chips(currentBet_);
+        painter.drawText(QRectF(felt.center().x() - 200, felt.center().y() - 105, 400, 72), Qt::AlignCenter, header);
+        if (communityCards_.isEmpty()) {
+            painter.setFont(QFont("Helvetica", 13));
+            painter.drawText(QRectF(felt.center().x() - 200, felt.center().y() - 18, 400, 30), Qt::AlignCenter, "Community cards will appear here");
+        } else {
+            drawCardRow(painter, communityCards_, {felt.center().x(), felt.center().y() + 22}, 54, 74);
+        }
+        painter.restore();
+    }
+
+    void drawHoleCards(QPainter& painter, const QRectF& felt, const QPointF& localPoint) const {
+        const auto vector = localPoint - felt.center();
+        const auto length = std::hypot(vector.x(), vector.y());
+        const auto direction = length > 0.01 ? QPointF(vector.x() / length, vector.y() / length) : QPointF(0, 1);
+        const auto cardCenter = localPoint - direction * 112;
+        painter.save();
+        painter.setPen(QColor("#F6D365"));
+        painter.setFont(QFont("Helvetica", 12, QFont::DemiBold));
+        painter.drawText(QRectF(cardCenter.x() - 90, cardCenter.y() - 52, 180, 20), Qt::AlignCenter, "Your hole cards");
+        drawCardRow(painter, localHoleCards_, cardCenter, 46, 64);
+        painter.restore();
+    }
+
     std::array<QString, 8> playerNames_{};
     std::array<qint64, 8> playerStacks_{};
     std::array<bool, 8> playerActing_{};
     std::array<bool, 8> playerDealer_{};
     QString localPlayerName_;
-    QString centerText_{"POT  0\n\nCommunity cards will appear here"};
+    QStringList communityCards_;
+    QStringList localHoleCards_;
+    qint64 pot_{0};
+    qint64 currentBet_{0};
+    QString street_;
 };
 
 class ConnectionDialog final : public QDialog {
@@ -196,21 +298,29 @@ public:
         pokerTable_ = new PokerTable(central);
         layout->addWidget(pokerTable_, 1);
         auto* actions = new QFrame(central);
-        auto* actionLayout = new QHBoxLayout(actions);
+        auto* actionLayout = new QVBoxLayout(actions);
+        auto* actionInfoLayout = new QHBoxLayout;
         actionStatus_ = new QLabel("No human player is attached.", actions);
-        actionLayout->addWidget(actionStatus_);
+        actionInfoLayout->addWidget(actionStatus_);
+        wagerStatus_ = new QLabel("Current bet: 0 chips", actions);
+        wagerStatus_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        actionInfoLayout->addWidget(wagerStatus_, 1);
+        actionLayout->addLayout(actionInfoLayout);
+        auto* actionControlsLayout = new QHBoxLayout;
         amount_ = new QSpinBox(actions);
         amount_->setRange(0, 1000000000);
         amount_->setPrefix("Total commitment: ");
         amount_->setEnabled(false);
-        actionLayout->addWidget(amount_);
+        actionControlsLayout->addWidget(amount_);
         for (const auto* action : {"Check", "Call", "Bet", "Raise", "Fold"}) {
             auto* button = new QPushButton(action, actions);
+            button->setProperty("actionName", QString::fromUtf8(action).toLower());
             button->setEnabled(false);
             actionButtons_.push_back(button);
             connect(button, &QPushButton::clicked, this, [this, action] { selectHumanAction(action); });
-            actionLayout->addWidget(button);
+            actionControlsLayout->addWidget(button);
         }
+        actionLayout->addLayout(actionControlsLayout);
         layout->addWidget(actions);
         setCentralWidget(central);
         auto* connectionMenu = menuBar()->addMenu("Connection");
@@ -453,10 +563,15 @@ private:
         pokerTable_->setTableView(view);
         tableSequence_ = view.value("sequence").toInteger();
         const auto legal = view.value("legalActions").toObject();
+        const auto currentBet = view.value("currentBet").toInteger();
+        const auto callAmount = legal.value("callAmount").toInteger();
         bool anyAction = false;
         for (auto* button : actionButtons_) {
-            const auto enabled = humanPlayer_ && legal.value(button->text().toLower()).toBool();
+            const auto actionName = button->property("actionName").toString();
+            const auto enabled = humanPlayer_ && legal.value(actionName).toBool();
             button->setEnabled(enabled);
+            button->setText(actionName == "call" && enabled && callAmount > 0
+                ? "Call " + QLocale().toString(callAmount) : actionName.left(1).toUpper() + actionName.mid(1));
             anyAction = anyAction || enabled;
         }
         const auto minimum = legal.value("minimumAmount").toInteger();
@@ -467,6 +582,8 @@ private:
             amount_->setRange(static_cast<int>(std::min<qint64>(minimum, 1000000000)), static_cast<int>(std::min<qint64>(maximum, 1000000000)));
             amount_->setValue(static_cast<int>(std::min<qint64>(minimum, 1000000000)));
         }
+        wagerStatus_->setText("Current bet: " + QLocale().toString(currentBet) + " chips"
+            + (humanPlayer_ && callAmount > 0 ? " · You need " + QLocale().toString(callAmount) + " to call" : ""));
         if (!humanPlayer_) actionStatus_->setText("Choose a local player through New Game to view private cards and act.");
         else if (anyAction) actionStatus_->setText("Your turn. Select one of the server-approved actions.");
         else actionStatus_->setText("Waiting for " + view.value("actingSeat").toVariant().toString() + " to act.");
@@ -588,7 +705,11 @@ private:
     }
 
     void setActionControlsEnabled(bool enabled) {
-        for (auto* button : actionButtons_) button->setEnabled(enabled);
+        for (auto* button : actionButtons_) {
+            button->setEnabled(enabled);
+            const auto actionName = button->property("actionName").toString();
+            button->setText(actionName.left(1).toUpper() + actionName.mid(1));
+        }
     }
 
     void clearHumanPlayer() {
@@ -599,6 +720,7 @@ private:
         amount_->setEnabled(false);
         tableSequence_ = 0;
         actionStatus_->setText("No human player is attached.");
+        wagerStatus_->setText("Current bet: 0 chips");
     }
 
 private:
@@ -616,6 +738,7 @@ private:
     QComboBox* table_{};
     PokerTable* pokerTable_{};
     QLabel* actionStatus_{};
+    QLabel* wagerStatus_{};
     QSpinBox* amount_{};
     std::vector<QPushButton*> actionButtons_;
     QAction* disconnectAction_{};
