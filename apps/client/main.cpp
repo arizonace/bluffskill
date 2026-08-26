@@ -1,14 +1,26 @@
 #include <QApplication>
+#include <QAction>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QFrame>
+#include <QIntValidator>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMainWindow>
 #include <QMenuBar>
+#include <QMessageBox>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPainter>
 #include <QPushButton>
 #include <QStatusBar>
+#include <QUrl>
 #include <QVBoxLayout>
+#include <QLineEdit>
 
 namespace {
 
@@ -40,6 +52,50 @@ protected:
     }
 };
 
+class ConnectionDialog final : public QDialog {
+public:
+    explicit ConnectionDialog(QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle("Connect to BluffSkill Server");
+        auto* layout = new QVBoxLayout(this);
+        auto* form = new QFormLayout;
+        host_ = new QLineEdit("127.0.0.1", this);
+        host_->setPlaceholderText("localhost or a server name");
+        port_ = new QLineEdit(this);
+        port_->setValidator(new QIntValidator(1, 65535, port_));
+        port_->setPlaceholderText("Server port");
+        form->addRow("Server", host_);
+        form->addRow("Port", port_);
+        layout->addLayout(form);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, [this] {
+            if (host_->text().trimmed().isEmpty() || port_->text().isEmpty()) {
+                QMessageBox::warning(this, "Connection details required", "Enter both a server name and its port.");
+                return;
+            }
+            accept();
+        });
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttons);
+    }
+
+    [[nodiscard]] QUrl healthUrl() const {
+        QUrl url;
+        url.setScheme("http"); // The prototype server is intentionally localhost HTTP only.
+        url.setHost(host_->text().trimmed());
+        url.setPort(port_->text().toInt());
+        url.setPath("/v1/health");
+        return url;
+    }
+
+    [[nodiscard]] QString displayAddress() const {
+        return host_->text().trimmed() + ':' + port_->text();
+    }
+
+private:
+    QLineEdit* host_{};
+    QLineEdit* port_{};
+};
+
 class ClientWindow final : public QMainWindow {
 public:
     ClientWindow() {
@@ -63,10 +119,51 @@ public:
         }
         layout->addWidget(actions);
         setCentralWidget(central);
-        menuBar()->addMenu("Connection")->addAction("Connect…");
+        auto* connectAction = menuBar()->addMenu("Connection")->addAction("Connect…");
+        connect(connectAction, &QAction::triggered, this, [this] { connectToServer(); });
         statusBar()->showMessage("Choose Connection → Connect… to begin.");
     }
+
 private:
+    void connectToServer() {
+        ConnectionDialog dialog(this);
+        if (dialog.exec() != QDialog::Accepted) return;
+
+        const auto address = dialog.displayAddress();
+        statusBar()->showMessage("Connecting to " + address + "…");
+        auto* reply = network_.get(QNetworkRequest(dialog.healthUrl()));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, address] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto response = reply->readAll();
+            const auto body = QJsonDocument::fromJson(response).object();
+            const auto connected = reply->error() == QNetworkReply::NoError && status == 200
+                && body.value("status") == "ok";
+            const auto error = reply->errorString();
+            reply->deleteLater();
+
+            if (!connected) {
+                statusBar()->showMessage("Could not connect to " + address);
+                const auto detail = status > 0 ? "The server returned HTTP " + QString::number(status) + "." : error;
+                QMessageBox::warning(this, "Server unavailable",
+                    "BluffSkill could not verify the server at " + address + ".\n\n" + detail);
+                return;
+            }
+
+            server_->setEnabled(true);
+            server_->clear();
+            server_->addItem(address);
+            competition_->clear();
+            competition_->addItem("Competition list coming next");
+            competition_->setEnabled(false);
+            table_->clear();
+            table_->addItem("Choose a competition first");
+            table_->setEnabled(false);
+            statusBar()->showMessage("Connected to " + address);
+        });
+    }
+
+private:
+    QNetworkAccessManager network_{this};
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};
