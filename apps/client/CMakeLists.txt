@@ -1,4 +1,5 @@
 qt_add_executable(bluffskill-client
+    human_player.cpp
     main.cpp
 )
 

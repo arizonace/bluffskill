@@ -17,4 +17,10 @@ int main() {
     }
     assert(names.size() == 6);
     assert(seats == std::set<std::size_t>({1, 2, 3, 4, 5, 6}));
+
+    const auto withApiPlayer = house.createApiPlayer(created.name, "Red", "Arizona");
+    const auto& seatedApiPlayer = withApiPlayer.tables.front().players.back();
+    assert(seatedApiPlayer.player.name == "Arizona");
+    assert(seatedApiPlayer.player.kind == bluffskill::poker::PlayerKind::api);
+    assert(seatedApiPlayer.seat == 7);
 }

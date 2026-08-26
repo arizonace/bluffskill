@@ -1,4 +1,5 @@
 #include "bluffskill/poker/house.hpp"
+#include "bluffskill/poker/api_player.hpp"
 #include "bluffskill/poker/reference_player.hpp"
 
 #include <array>
@@ -73,6 +74,39 @@ std::string House::nextReferencePlayerName(const Competition& competition) {
     throw std::runtime_error("could not assign a unique reference-player name");
 }
 
+std::size_t House::findTableIndex(const Competition& competition, std::string_view tableName) const {
+    const auto requested = normalizeName(tableName);
+    const auto found = std::ranges::find_if(competition.summary.tables, [&requested](const TableSummary& table) {
+        return normalizeName(table.name) == requested;
+    });
+    if (found == competition.summary.tables.end()) throw std::invalid_argument("table was not found");
+    return static_cast<std::size_t>(std::distance(competition.summary.tables.begin(), found));
+}
+
+std::optional<std::size_t> House::firstFreeSeat(const Competition& competition, std::size_t tableIndex) const {
+    const auto& table = competition.summary.tables.at(tableIndex);
+    for (std::size_t candidateSeat = 1; candidateSeat <= table.maximumSeats; ++candidateSeat) {
+        const auto occupied = std::ranges::any_of(competition.players, [tableIndex, candidateSeat](const auto& player) {
+            return player.tableIndex == tableIndex && player.seat == candidateSeat;
+        });
+        if (!occupied) return candidateSeat;
+    }
+    return std::nullopt;
+}
+
+void House::validatePlayerName(const Competition& competition, std::string_view name) const {
+    if (name.empty() || !std::ranges::all_of(name, [](unsigned char character) {
+        return std::isalnum(character) || character == '-';
+    })) {
+        throw std::invalid_argument("player name must contain only letters, digits, and dashes");
+    }
+    const auto normalized = normalizeName(name);
+    const auto exists = std::ranges::any_of(competition.players, [&normalized](const auto& player) {
+        return normalizeName(player.player->name()) == normalized;
+    });
+    if (exists) throw std::invalid_argument("player name is already in use for this competition");
+}
+
 CompetitionSummary House::createReferencePlayers(std::string_view competitionName, std::size_t count) {
     auto& competition = findCompetition(competitionName);
     const auto occupiedSeats = competition.players.size();
@@ -86,20 +120,11 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
     std::uniform_real_distribution<double> disposition(0.15, 0.85);
     for (std::size_t index = 0; index < count; ++index) {
         std::size_t tableIndex = 0;
-        std::size_t seat = 0;
-        for (; tableIndex < competition.summary.tables.size() && seat == 0; ++tableIndex) {
-            const auto& table = competition.summary.tables[tableIndex];
-            for (std::size_t candidateSeat = 1; candidateSeat <= table.maximumSeats; ++candidateSeat) {
-                const auto occupied = std::ranges::any_of(competition.players, [tableIndex, candidateSeat](const auto& player) {
-                    return player.tableIndex == tableIndex && player.seat == candidateSeat;
-                });
-                if (!occupied) {
-                    seat = candidateSeat;
-                    break;
-                }
-            }
+        std::optional<std::size_t> seat;
+        for (; tableIndex < competition.summary.tables.size() && !seat; ++tableIndex) {
+            seat = firstFreeSeat(competition, tableIndex);
         }
-        if (seat == 0) throw std::runtime_error("could not find a free seat");
+        if (!seat) throw std::runtime_error("could not find a free seat");
         competition.players.push_back({
             .player = std::make_unique<ReferencePlayer>(nextReferencePlayerName(competition), ReferencePlayerProfile{
                 .riskTolerance = disposition(random_),
@@ -107,9 +132,23 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
                 .variability = disposition(random_),
             }),
             .tableIndex = tableIndex - 1,
-            .seat = seat,
+            .seat = *seat,
         });
     }
+    return summaryOf(competition);
+}
+
+CompetitionSummary House::createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name) {
+    auto& competition = findCompetition(competitionName);
+    validatePlayerName(competition, name);
+    const auto tableIndex = findTableIndex(competition, tableName);
+    const auto seat = firstFreeSeat(competition, tableIndex);
+    if (!seat) throw std::invalid_argument("table has no free seats");
+    competition.players.push_back({
+        .player = std::make_unique<ApiPlayer>(std::move(name)),
+        .tableIndex = tableIndex,
+        .seat = *seat,
+    });
     return summaryOf(competition);
 }
 

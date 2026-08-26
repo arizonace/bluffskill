@@ -1,4 +1,5 @@
 add_library(bluffskill_poker STATIC
+    src/api_player.cpp
     src/house.cpp
     src/reference_player.cpp
 )

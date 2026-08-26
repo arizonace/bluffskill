@@ -41,6 +41,7 @@ public:
     // `House` is the one singleton per server process. The application owns it.
     [[nodiscard]] CompetitionSummary createSingleTableTournament(TournamentSpec spec);
     [[nodiscard]] CompetitionSummary createReferencePlayers(std::string_view competitionName, std::size_t count);
+    [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
     [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
 
@@ -60,6 +61,9 @@ private:
     [[nodiscard]] CompetitionSummary summaryOf(const Competition& competition) const;
     [[nodiscard]] std::string nextCompetitionName() const;
     [[nodiscard]] std::string nextReferencePlayerName(const Competition& competition);
+    [[nodiscard]] std::size_t findTableIndex(const Competition& competition, std::string_view tableName) const;
+    [[nodiscard]] std::optional<std::size_t> firstFreeSeat(const Competition& competition, std::size_t tableIndex) const;
+    void validatePlayerName(const Competition& competition, std::string_view name) const;
 
     std::mt19937_64 random_{std::random_device{}()};
     std::vector<Competition> competitions_;

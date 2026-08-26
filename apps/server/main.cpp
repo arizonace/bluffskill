@@ -136,6 +136,21 @@ int main(int argc, char* argv[]) {
         return QHttpServerResponse(tables);
     });
 
+    server.route("/v1/competitions/<arg>/tables/<arg>/players", QHttpServerRequest::Method::Post,
+        [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            const auto json = QJsonDocument::fromJson(request.body()).object();
+            try {
+                const auto competition = window.house().createApiPlayer(
+                    competitionName.toStdString(), tableName.toStdString(), json.value("name").toString().toStdString());
+                window.refreshTree();
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/players → 201");
+                return QHttpServerResponse(competitionJson(competition), QHttpServerResponder::StatusCode::Created);
+            } catch (const std::exception& exception) {
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/players → 400");
+                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
+            }
+        });
+
     server.route("/v1/competitions/<arg>/reference-players", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QHttpServerRequest& request) -> QHttpServerResponse {
             const auto json = QJsonDocument::fromJson(request.body()).object();

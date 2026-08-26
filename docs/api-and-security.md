@@ -2,7 +2,7 @@
 
 ## Prototype endpoints
 
-All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they are scoped to a competition. The current prototype implements health, competition listing/creation, and reference-player creation.
+All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they are scoped to a competition. The current prototype implements health, competition listing/creation, reference-player creation, and API-player attachment.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -16,6 +16,8 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 | `GET` | `/v1/competitions/{competition}/events` | stream view-projected notifications |
 
 Each table in the table-list response includes `maximumSeats` and a `players` array. Every player entry has a one-based `seat`, name, and player kind; a player may be added to a competition only when it is assigned to a free table seat.
+
+`POST /v1/competitions/{competition}/tables/{table}/players` accepts only an API player name. The server constructs an `ApiPlayer` and deliberately has no human/bot/GUI field: a human client and an automated remote client are indistinguishable to it.
 
 Creation request example:
 
