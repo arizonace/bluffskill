@@ -1,0 +1,3 @@
+add_executable(cards_smoke_test cards_smoke_test.cpp)
+target_link_libraries(cards_smoke_test PRIVATE bluffskill_cards)
+add_test(NAME cards_smoke_test COMMAND cards_smoke_test)

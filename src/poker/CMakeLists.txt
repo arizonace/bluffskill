@@ -1,0 +1,9 @@
+add_library(bluffskill_poker STATIC
+    src/house.cpp
+)
+
+target_include_directories(bluffskill_poker
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(bluffskill_poker PUBLIC bluffskill_cards)
+target_compile_features(bluffskill_poker PUBLIC cxx_std_20)
