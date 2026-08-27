@@ -3,9 +3,9 @@ export SCRIPTS=$REPO/scripts
 export COMMANDS=$SCRIPTS/commands
 alias commands='source $COMMANDS'
 
-alias build='cd $REPO && cmake --build build --parallel && cd -'
-alias server='$REPO/build/apps/server/bluffskill-server'
-alias client='$REPO/build/apps/client/bluffskill-client'
+alias bluffskill-build='cd $REPO && cmake --build build --parallel && cd -'
+alias bluffskill-server='$REPO/build/apps/server/bluffskill-server'
+alias bluffskill-client='$REPO/build/apps/client/bluffskill-client'
 
 function mac-build {
   cmake --build "$REPO/build" --target build-mac-bundles
@@ -13,6 +13,7 @@ function mac-build {
 
 alias mac-server='open "$REPO/build/apps/server/BluffSkill Server.app"'
 alias mac-client='open "$REPO/build/apps/client/BluffSkill.app"'
+alias mac-start='mac-server && mac-client'
 
 function bluffskill-stop {
   osascript <<'APPLESCRIPT'
@@ -33,7 +34,6 @@ try
 end try
 APPLESCRIPT
 }
-
 
 function bluffskill-stop-exec {
   osascript <<'APPLESCRIPT'

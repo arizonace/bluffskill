@@ -285,10 +285,11 @@ int main(int argc, char* argv[]) {
         });
 
     server.route("/v1/competitions/<arg>/tables/<arg>/next-hand", QHttpServerRequest::Method::Post,
-        [&window](const QString& competitionName, const QString& tableName) -> QHttpServerResponse {
+        [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
             try {
+                const auto viewerName = QJsonDocument::fromJson(request.body()).object().value("viewer").toString();
                 window.house().startNextHand(competitionName.toStdString(), tableName.toStdString());
-                const auto table = window.house().tableView(competitionName.toStdString(), tableName.toStdString());
+                const auto table = window.house().tableView(competitionName.toStdString(), tableName.toStdString(), viewerName.toStdString());
                 window.refreshTree();
                 window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/next-hand → 200");
                 return tableViewResponse(table);

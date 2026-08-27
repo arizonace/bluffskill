@@ -734,7 +734,7 @@ private:
         nextHandTimer_.stop();
         const auto attempt = connectionGeneration_;
         const auto path = "/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText() + "/next-hand";
-        auto* reply = postJson(path, {});
+        auto* reply = postJson(path, QJsonObject{{"viewer", humanPlayer_ ? humanPlayer_->apiPlayerName() : QString{}}});
         connect(reply, &QNetworkReply::finished, this, [this, reply, attempt] {
             nextHandRequestInFlight_ = false;
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
