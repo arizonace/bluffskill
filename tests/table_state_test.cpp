@@ -68,9 +68,30 @@ int main() {
     assert(finished.showdownOccurred);
     assert(finished.players[1].holeCards.size() == 2);
     assert(finished.players[2].holeCards.size() == 2);
+    assert(!finished.players[0].showdownDescription.empty());
+    assert(!finished.players[1].showdownDescription.empty());
+    assert(!finished.players[2].showdownDescription.empty());
     assert(finished.payouts.size() == 2);
     assert(finished.payouts[0].amount == 300);
     assert(finished.payouts[1].amount == 200);
+
+    // Uneven action without an all-in remains one pot; side pots only cap an
+    // all-in player's eligibility.
+    Table noAllInSidePot("No all-in side pot", 3, 1000);
+    noAllInSidePot.seatPlayer("Raise", PlayerKind::api, 1, 1000);
+    noAllInSidePot.seatPlayer("CallOne", PlayerKind::api, 2, 1000);
+    noAllInSidePot.seatPlayer("CallTwo", PlayerKind::api, 3, 1000);
+    noAllInSidePot.startHand();
+    auto noAllInView = noAllInSidePot.viewFor("Raise");
+    noAllInSidePot.submitAction("Raise", Action::raise, 200, noAllInView.eventSequence);
+    noAllInView = noAllInSidePot.viewFor("CallOne");
+    noAllInSidePot.submitAction("CallOne", Action::call, 0, noAllInView.eventSequence);
+    noAllInView = noAllInSidePot.viewFor("CallTwo");
+    noAllInSidePot.submitAction("CallTwo", Action::call, 0, noAllInView.eventSequence);
+    noAllInView = noAllInSidePot.viewFor();
+    assert(noAllInView.street == Street::flop);
+    assert(noAllInView.pots.size() == 1);
+    assert(noAllInView.pots[0].amount == 600);
 
     Table rotation("Rotation", 3, 500);
     rotation.seatPlayer("One", PlayerKind::api, 1, 500);

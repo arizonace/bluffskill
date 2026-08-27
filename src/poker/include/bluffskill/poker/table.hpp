@@ -73,6 +73,9 @@ struct TablePlayerView {
     bool dealer{false};
     bool acting{false};
     std::vector<cards::Card> holeCards; // Populated only for the requested viewer.
+    // Populated beside revealed showdown cards.  It is deliberately a server
+    // projection so clients do not evaluate or infer another player's hand.
+    std::string showdownDescription;
 };
 
 struct ActionView {
@@ -141,6 +144,7 @@ private:
     void advanceAfterAction(Seat& actor, bool fullRaise);
     void advanceStreet();
     void updateActor();
+    void returnUncalledContribution();
     void finishByFold();
     void settleShowdown();
     void advanceBlindLevelIfDue();

@@ -51,7 +51,7 @@ namespace {
 class PokerTable final : public QWidget {
 public:
     explicit PokerTable(QWidget* parent = nullptr) : QWidget(parent) {
-        setMinimumSize(900, 520);
+        setMinimumSize(900, 590);
         setAccessibleName("Poker table");
     }
 
@@ -66,6 +66,7 @@ public:
         playerSmallBlind_.fill(false);
         playerBigBlind_.fill(false);
         playerHoleCards_.fill({});
+        playerShowdownDescriptions_.fill({});
         payoutStacks_.fill({});
         for (const auto& item : players) {
             const auto player = item.toObject();
@@ -88,6 +89,7 @@ public:
         playerSmallBlind_.fill(false);
         playerBigBlind_.fill(false);
         playerHoleCards_.fill({});
+        playerShowdownDescriptions_.fill({});
         payoutStacks_.fill({});
         pot_ = 0;
         currentBet_ = 0;
@@ -110,6 +112,7 @@ public:
         playerSmallBlind_.fill(false);
         playerBigBlind_.fill(false);
         playerHoleCards_.fill({});
+        playerShowdownDescriptions_.fill({});
         payoutStacks_.fill({});
         for (const auto& item : table.value("players").toArray()) {
             const auto player = item.toObject();
@@ -123,6 +126,7 @@ public:
                 playerDealer_[index] = player.value("dealer").toBool();
                 playerFolded_[index] = player.value("folded").toBool();
                 for (const auto& card : player.value("holeCards").toArray()) playerHoleCards_[index].append(card.toString());
+                playerShowdownDescriptions_[index] = player.value("showdownDescription").toString();
             }
         }
         pot_ = 0;
@@ -214,7 +218,8 @@ protected:
             const auto side = QPointF(-direction.y(), direction.x());
             const auto blind = playerSmallBlind_[i] ? RoleButton::smallBlind
                 : playerBigBlind_[i] ? RoleButton::bigBlind : RoleButton::none;
-            if (playerFolded_[i]) drawFoldedMarker(painter, point - direction * 28);
+            const auto busted = playerStacks_[i] == 0 && playerCommitted_[i] == 0;
+            if (playerFolded_[i] && !busted) drawFoldedMarker(painter, point - direction * 28);
             if (playerDealer_[i] && blind != RoleButton::none) {
                 const auto dealerButton = drawRoleButton(painter, front - side * 17, RoleButton::dealer);
                 drawRoleButton(painter, front + side * 17, blind);
@@ -226,7 +231,11 @@ protected:
                 drawRoleButton(painter, front, blind);
             }
             drawPayoutStacks(painter, front - direction * 25, payoutStacks_[i]);
-            if (showdownOccurred_ && !playerHoleCards_[i].isEmpty()) drawCardRow(painter, playerHoleCards_[i], front - direction * 57, 38, 52);
+            if (showdownOccurred_ && !playerHoleCards_[i].isEmpty()) {
+                const auto cardsCenter = front - direction * 57;
+                drawCardRow(painter, playerHoleCards_[i], cardsCenter, 38, 52);
+                drawShowdownDescription(painter, playerShowdownDescriptions_[i], cardsCenter - direction * 43);
+            }
         }
         if (hasLocalSeat && !localHoleCards_.isEmpty() && !showdownOccurred_) drawHoleCards(painter, felt, localPoint);
     }
@@ -286,6 +295,15 @@ private:
             drawCard(painter, {left, center.y() - height / 2.0, width, height}, card);
             left += width + gap;
         }
+    }
+
+    static void drawShowdownDescription(QPainter& painter, const QString& description, const QPointF& center) {
+        if (description.isEmpty()) return;
+        painter.save();
+        painter.setPen(Qt::white);
+        painter.setFont(QFont("Helvetica", 12, QFont::DemiBold));
+        painter.drawText(QRectF(center.x() - 100, center.y() - 13, 200, 28), Qt::AlignCenter | Qt::TextWordWrap, description);
+        painter.restore();
     }
 
     static QRectF drawRoleButton(QPainter& painter, QPointF center, RoleButton role) {
@@ -375,6 +393,7 @@ private:
     std::array<bool, 8> playerSmallBlind_{};
     std::array<bool, 8> playerBigBlind_{};
     std::array<QStringList, 8> playerHoleCards_{};
+    std::array<QString, 8> playerShowdownDescriptions_{};
     std::array<QVector<qint64>, 8> payoutStacks_{};
     QString localPlayerName_;
     QStringList communityCards_;
@@ -494,7 +513,7 @@ class ClientWindow final : public QMainWindow {
 public:
     ClientWindow() : settings_(bluffskill::app_config::AppConfig::load()) {
         setWindowTitle("BluffSkill");
-        resize(1100, 760);
+        resize(1100, 830);
         auto* central = new QWidget(this);
         auto* layout = new QVBoxLayout(central);
         auto* connection = new QFrame(central);
@@ -514,7 +533,8 @@ public:
         connectionRow->addWidget(table_, 1);
         connectionLayout->addLayout(connectionRow);
         auto* dealRow = new QHBoxLayout;
-        dealRow->addWidget(new QLabel("Remaining Players", connection));
+        remainingPlayersCaption_ = new QLabel("Remaining Players", connection);
+        dealRow->addWidget(remainingPlayersCaption_);
         remainingPlayers_ = new QLabel("—", connection);
         remainingPlayers_->setMinimumWidth(42);
         dealRow->addWidget(remainingPlayers_);
@@ -889,11 +909,19 @@ private:
         tableSequence_ = view.value("sequence").toInteger();
         lastStreet_ = view.value("street").toString();
         int remaining = 0;
+        int playersWithChips = 0;
+        QString tableWinner;
         for (const auto& item : view.value("players").toArray()) {
             const auto player = item.toObject();
             if (player.value("stack").toInteger() > 0 || player.value("committed").toInteger() > 0) ++remaining;
+            if (player.value("stack").toInteger() > 0) {
+                ++playersWithChips;
+                tableWinner = player.value("name").toString();
+            }
         }
-        remainingPlayers_->setText(QString::number(remaining));
+        tableComplete_ = view.value("street").toString() == "Showdown" && playersWithChips == 1;
+        remainingPlayersCaption_->setText(tableComplete_ ? "Table Winner" : "Remaining Players");
+        remainingPlayers_->setText(tableComplete_ ? tableWinner : QString::number(remaining));
         const auto legal = view.value("legalActions").toObject();
         const auto currentBet = view.value("currentBet").toInteger();
         const auto callAmount = legal.value("callAmount").toInteger();
@@ -922,6 +950,11 @@ private:
         const auto handFinished = view.value("street").toString() == "Showdown";
         if (handFinished) {
             stopTurnCountdown();
+            if (tableComplete_) {
+                stopNextDealCountdown();
+                actionStatus_->setText("Table winner: " + tableWinner + ". The game is complete. Choose Game → Restart Game to play again.");
+                return;
+            }
             const auto hadShowdown = view.value("showdownOccurred").toBool();
             actionStatus_->setText(hadShowdown
                 ? "Showdown complete. The revealed cards and each pot winner are on the table. The next hand starts in " + QString::number(settings_.dealClockSeconds) + " seconds, or click the Dealer button now."
@@ -1101,7 +1134,7 @@ private:
 
     void restartGame() {
         if (!connected_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
-        if (lastStreet_ != "Showdown") {
+        if (!tableComplete_ && lastStreet_ != "Showdown") {
             QMessageBox warning(this);
             warning.setIcon(QMessageBox::Warning);
             warning.setWindowTitle("Restart active game?");
@@ -1267,6 +1300,9 @@ private:
         amountEdit_->clear();
         tableSequence_ = 0;
         lastShowdownSequence_ = -1;
+        tableComplete_ = false;
+        remainingPlayersCaption_->setText("Remaining Players");
+        remainingPlayers_->setText("—");
         nextHandRequestInFlight_ = false;
         stopNextDealCountdown();
         stopTurnCountdown();
@@ -1295,6 +1331,7 @@ private:
     bool paused_{};
     bool nextHandRequestInFlight_{};
     bool autoConnectInProgress_{};
+    bool tableComplete_{};
     bool turnCanCheck_{};
     bool turnCanFold_{};
     PauseReason pauseReason_{PauseReason::none};
@@ -1305,6 +1342,7 @@ private:
     QComboBox* competition_{};
     QComboBox* table_{};
     QLabel* remainingPlayers_{};
+    QLabel* remainingPlayersCaption_{};
     QLabel* nextDealIn_{};
     QPushButton* dealNowButton_{};
     PokerTable* pokerTable_{};

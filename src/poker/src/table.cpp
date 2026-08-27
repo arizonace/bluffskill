@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <array>
+#include <numeric>
 #include <random>
+#include <ranges>
 #include <vector>
 
 namespace bluffskill::poker {
@@ -76,6 +78,36 @@ HandRank bestHand(const std::vector<cards::Card>& cards) {
         if (candidate > best) best = candidate;
     }
     return best;
+}
+
+std::string rankName(int rank) {
+    return cards::toString(static_cast<cards::Rank>(rank));
+}
+
+std::string joinRanks(const std::vector<int>& ranks, std::size_t first = 0) {
+    std::string result;
+    for (std::size_t index = first; index < ranks.size(); ++index) {
+        if (!result.empty()) result += ',';
+        result += rankName(ranks[index]);
+    }
+    return result;
+}
+
+std::string describeHand(const HandRank& rank) {
+    const auto& values = rank.tiebreakers;
+    if (values.empty()) return {};
+    switch (rank.category) {
+    case 8: return "Straight Flush(" + rankName(values[0]) + ')';
+    case 7: return "Quad(" + rankName(values[0]) + "), " + joinRanks(values, 1);
+    case 6: return "Full-House(" + rankName(values[0]) + ',' + rankName(values[1]) + ')';
+    case 5: return "Flush(" + rankName(values[0]) + ')';
+    case 4: return "Straight(" + rankName(values[0]) + ')';
+    case 3: return "Set(" + rankName(values[0]) + "), " + joinRanks(values, 1);
+    case 2: return "Two Pair(" + rankName(values[0]) + ',' + rankName(values[1]) + "), " + joinRanks(values, 2);
+    case 1: return "Pair(" + rankName(values[0]) + "), " + joinRanks(values, 1);
+    case 0: return "High(" + rankName(values[0]) + "), " + joinRanks(values, 1);
+    default: return {};
+    }
 }
 
 } // namespace
@@ -343,16 +375,35 @@ LegalActions Table::legalActionsFor(const Seat& seat) const {
 }
 
 std::vector<PotView> Table::pots() const {
+    const auto totalCommitted = std::accumulate(seats_.begin(), seats_.end(), Chips{0}, [](Chips total, const Seat& seat) {
+        return total + seat.handCommitted;
+    });
+    if (totalCommitted == 0) return {};
+
+    // Uneven commitments only form side pots when an all-in player caps what
+    // they can contest.  Otherwise all contributed chips remain one pot.
     std::vector<Chips> levels;
-    for (const auto& seat : seats_) if (seat.handCommitted > 0) levels.push_back(seat.handCommitted);
+    for (const auto& seat : seats_) {
+        if (seat.allIn && seat.handCommitted > 0) levels.push_back(seat.handCommitted);
+    }
     std::ranges::sort(levels);
     levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
+    if (levels.empty()) {
+        PotView pot{.amount = totalCommitted};
+        for (const auto& seat : seats_) if (!seat.folded && seat.handCommitted > 0) pot.eligibleSeats.push_back(seat.number);
+        return {std::move(pot)};
+    }
+
+    const auto highestCommitment = std::ranges::max(seats_, {}, &Seat::handCommitted).handCommitted;
+    if (highestCommitment > levels.back()) levels.push_back(highestCommitment);
     std::vector<PotView> result;
     Chips previous = 0;
     for (const auto level : levels) {
         const auto contributors = std::count_if(seats_.begin(), seats_.end(), [level](const Seat& seat) { return seat.handCommitted >= level; });
         const auto amount = (level - previous) * contributors;
-        if (amount > 0) {
+        // A level above an all-in cap is a side pot only if continued action
+        // actually supplied more than one contribution at that level.
+        if (amount > 0 && (level <= levels.front() || contributors >= 2)) {
             PotView pot{.amount = amount};
             for (const auto& seat : seats_) if (seat.handCommitted >= level && !seat.folded) pot.eligibleSeats.push_back(seat.number);
             result.push_back(std::move(pot));
@@ -373,6 +424,11 @@ TableView Table::viewFor(std::string_view viewerName) const {
                                .folded = seat.folded, .dealer = dealerSeat_ && *dealerSeat_ == seat.number,
                                .acting = actingSeat_ && *actingSeat_ == seat.number};
         if (viewer == &seat || (showdownOccurred_ && !seat.folded)) player.holeCards = seat.holeCards;
+        if (showdownOccurred_ && !seat.folded) {
+            std::vector<cards::Card> cards = communityCards_;
+            cards.insert(cards.end(), seat.holeCards.begin(), seat.holeCards.end());
+            player.showdownDescription = describeHand(bestHand(cards));
+        }
         view.players.push_back(std::move(player));
     }
     if (viewer != nullptr) {
@@ -384,7 +440,27 @@ TableView Table::viewFor(std::string_view viewerName) const {
 
 bool Table::hasSingleLiveSeat() const { return liveSeats().size() == 1; }
 
+void Table::returnUncalledContribution() {
+    if (seats_.size() < 2) return;
+    const auto highest = std::ranges::max(seats_, {}, &Seat::handCommitted).handCommitted;
+    const auto contributors = std::count_if(seats_.begin(), seats_.end(), [highest](const Seat& seat) {
+        return seat.handCommitted == highest;
+    });
+    if (highest == 0 || contributors != 1) return;
+    const auto otherHighest = std::ranges::max(seats_ | std::views::filter([highest](const Seat& seat) {
+        return seat.handCommitted != highest;
+    }), {}, &Seat::handCommitted).handCommitted;
+    const auto refund = highest - otherHighest;
+    if (refund == 0) return;
+    auto& seat = *std::ranges::find_if(seats_, [highest](const Seat& candidate) { return candidate.handCommitted == highest; });
+    seat.stack += refund;
+    seat.handCommitted -= refund;
+    seat.roundCommitted = std::min(seat.roundCommitted, seat.handCommitted);
+    seat.allIn = false;
+}
+
 void Table::finishByFold() {
+    returnUncalledContribution();
     const auto live = liveSeats();
     if (live.size() != 1) return;
     Chips winnings = 0;
@@ -400,6 +476,7 @@ void Table::finishByFold() {
 
 void Table::settleShowdown() {
     if (communityCards_.size() != 5) throw std::logic_error("showdown requires five community cards");
+    returnUncalledContribution();
     payouts_.clear();
     for (const auto& pot : pots()) {
         std::vector<Seat*> eligible;
