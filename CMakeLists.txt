@@ -11,6 +11,7 @@ qt_standard_project_setup()
 
 add_subdirectory(src/cards)
 add_subdirectory(src/poker)
+add_subdirectory(src/app_config)
 add_subdirectory(apps/server)
 add_subdirectory(apps/client)
 

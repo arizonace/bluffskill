@@ -14,6 +14,7 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 | `GET` | `/v1/competitions/{competition}/tables/{table}/view` | fetch viewer-projected table state |
 | `POST` | `/v1/competitions/{competition}/tables/{table}/actions` | submit an action |
 | `POST` | `/v1/competitions/{competition}/tables/{table}/next-hand` | begin the next hand after the displayed result; body may name the response viewer |
+| `POST` | `/v1/competitions/{competition}/tables/{table}/restart` | reset stacks and begin a new hand on the existing table; body may name the response viewer |
 | `GET` | `/v1/competitions/{competition}/events` | stream view-projected notifications |
 
 Each table in the table-list response includes `maximumSeats` and a `players` array. Every player entry has a one-based `seat`, name, and player kind; a player may be added to a competition only when it is assigned to a free table seat.

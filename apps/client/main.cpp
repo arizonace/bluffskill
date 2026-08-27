@@ -1,8 +1,10 @@
 #include "human_player.hpp"
+#include "bluffskill/app_config/app_config.hpp"
 
 #include <QApplication>
 #include <QAction>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -28,6 +30,7 @@
 #include <QSet>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QToolButton>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVBoxLayout>
@@ -37,6 +40,7 @@
 #include <QVector>
 
 #include <memory>
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -222,7 +226,7 @@ protected:
                 drawRoleButton(painter, front, blind);
             }
             drawPayoutStacks(painter, front - direction * 25, payoutStacks_[i]);
-            if (showdownOccurred_ && !playerHoleCards_[i].isEmpty()) drawCardRow(painter, playerHoleCards_[i], front - direction * 47, 27, 38);
+            if (showdownOccurred_ && !playerHoleCards_[i].isEmpty()) drawCardRow(painter, playerHoleCards_[i], front - direction * 57, 38, 52);
         }
         if (hasLocalSeat && !localHoleCards_.isEmpty() && !showdownOccurred_) drawHoleCards(painter, felt, localPoint);
     }
@@ -265,10 +269,12 @@ private:
         painter.setBrush(QColor("#FFF9EA"));
         painter.drawRoundedRect(cardRect, 7, 7);
         painter.setPen(card.color);
-        painter.setFont(QFont("Helvetica", 16, QFont::Bold));
-        painter.drawText(cardRect.adjusted(6, 4, -4, -4), Qt::AlignLeft | Qt::AlignTop, card.rank);
-        painter.setFont(QFont("Helvetica", 34, QFont::DemiBold));
-        painter.drawText(cardRect, Qt::AlignCenter, card.suit);
+        const auto rankSize = std::max(9, static_cast<int>(cardRect.height() * 0.22));
+        const auto suitSize = std::max(16, static_cast<int>(cardRect.height() * 0.46));
+        painter.setFont(QFont("Helvetica", rankSize, QFont::Bold));
+        painter.drawText(cardRect.adjusted(4, 3, -3, -3), Qt::AlignLeft | Qt::AlignTop, card.rank);
+        painter.setFont(QFont("Helvetica", suitSize, QFont::DemiBold));
+        painter.drawText(cardRect.adjusted(2, cardRect.height() * 0.13, -2, 0), Qt::AlignCenter, card.suit);
         painter.restore();
     }
 
@@ -384,15 +390,58 @@ private:
     std::function<void()> dealerAdvanceHandler_;
 };
 
+class SettingsDialog final : public QDialog {
+public:
+    explicit SettingsDialog(const bluffskill::app_config::Settings& settings, QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle("BluffSkill Settings");
+        auto* layout = new QFormLayout(this);
+        playerClock_ = new QSpinBox(this); playerClock_->setRange(5, 3600); playerClock_->setValue(settings.playerClockSeconds);
+        dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
+        defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
+        autoConnect_ = new QCheckBox("Automatically try preferred localhost ports", this); autoConnect_->setChecked(settings.clientAutoConnect);
+        for (int index = 0; index < 3; ++index) {
+            ports_[index] = new QSpinBox(this); ports_[index]->setRange(1, 65535); ports_[index]->setValue(settings.serverPreferredPorts.value(index));
+        }
+        layout->addRow("Player Clock (seconds)", playerClock_);
+        layout->addRow("Deal Clock (seconds)", dealClock_);
+        layout->addRow("Default Player Name", defaultPlayerName_);
+        layout->addRow("Preferred Port 1", ports_[0]);
+        layout->addRow("Preferred Port 2", ports_[1]);
+        layout->addRow("Preferred Port 3", ports_[2]);
+        layout->addRow("Client AutoConnect", autoConnect_);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Save, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addRow(buttons);
+    }
+
+    [[nodiscard]] bluffskill::app_config::Settings settings(bluffskill::app_config::Settings value) const {
+        value.playerClockSeconds = playerClock_->value();
+        value.dealClockSeconds = dealClock_->value();
+        value.defaultPlayerName = defaultPlayerName_->text();
+        value.clientAutoConnect = autoConnect_->isChecked();
+        value.serverPreferredPorts.clear();
+        for (const auto* port : ports_) value.serverPreferredPorts.append(static_cast<quint16>(port->value()));
+        return value;
+    }
+
+private:
+    QSpinBox* playerClock_{};
+    QSpinBox* dealClock_{};
+    QLineEdit* defaultPlayerName_{};
+    QCheckBox* autoConnect_{};
+    std::array<QSpinBox*, 3> ports_{};
+};
+
 class ConnectionDialog final : public QDialog {
 public:
-    explicit ConnectionDialog(QWidget* parent = nullptr) : QDialog(parent) {
+    explicit ConnectionDialog(const bluffskill::app_config::Settings& settings, QWidget* parent = nullptr) : QDialog(parent) {
         setWindowTitle("Connect to BluffSkill Server");
         auto* layout = new QVBoxLayout(this);
         auto* form = new QFormLayout;
         host_ = new QLineEdit("127.0.0.1", this);
         host_->setPlaceholderText("localhost or a server name");
-        port_ = new QLineEdit(this);
+        port_ = new QLineEdit(QString::number(settings.serverPreferredPorts.value(0)), this);
         port_->setValidator(new QIntValidator(1, 65535, port_));
         port_->setPlaceholderText("Server port");
         form->addRow("Server", host_);
@@ -408,6 +457,7 @@ public:
         });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttons);
+        port_->setFocus();
     }
 
     [[nodiscard]] QUrl healthUrl() const {
@@ -434,7 +484,7 @@ private:
 
 class ClientWindow final : public QMainWindow {
 public:
-    ClientWindow() {
+    ClientWindow() : settings_(bluffskill::app_config::AppConfig::load()) {
         setWindowTitle("BluffSkill");
         resize(1100, 760);
         auto* central = new QWidget(this);
@@ -481,16 +531,15 @@ public:
         auto* actionInfoLayout = new QHBoxLayout;
         actionStatus_ = new QLabel("No human player is attached.", actions);
         actionInfoLayout->addWidget(actionStatus_);
+        pausePlayButton_ = new QPushButton("Pause", actions);
+        pausePlayButton_->setEnabled(false);
+        connect(pausePlayButton_, &QPushButton::clicked, this, [this] { togglePause(); });
+        actionInfoLayout->addWidget(pausePlayButton_);
         wagerStatus_ = new QLabel("Current bet: 0 chips", actions);
         wagerStatus_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         actionInfoLayout->addWidget(wagerStatus_, 1);
         actionLayout->addLayout(actionInfoLayout);
         auto* actionControlsLayout = new QHBoxLayout;
-        amount_ = new QSpinBox(actions);
-        amount_->setRange(0, 1000000000);
-        amount_->setPrefix("Total commitment: ");
-        amount_->setEnabled(false);
-        actionControlsLayout->addWidget(amount_);
         for (const auto* action : {"Check", "Call", "Bet", "Raise", "Fold"}) {
             auto* button = new QPushButton(action, actions);
             button->setProperty("actionName", QString::fromUtf8(action).toLower());
@@ -500,6 +549,32 @@ public:
             actionControlsLayout->addWidget(button);
         }
         actionLayout->addLayout(actionControlsLayout);
+        auto* wagerLayout = new QHBoxLayout;
+        wagerLayout->addWidget(new QLabel("Total commitment", actions));
+        amountEdit_ = new QLineEdit(actions);
+        amountEdit_->setValidator(new QIntValidator(0, 1000000000, amountEdit_));
+        amountEdit_->setEnabled(false);
+        amountEdit_->setMinimumWidth(115);
+        connect(amountEdit_, &QLineEdit::editingFinished, this, [this] { normalizeWagerAmount(); });
+        wagerLayout->addWidget(amountEdit_);
+        constexpr std::array<qint64, 4> denominations{25, 100, 500, 1000};
+        for (std::size_t index = 0; index < denominations.size(); ++index) {
+            auto* denominationLayout = new QVBoxLayout;
+            denominationUp_[index] = new QToolButton(actions);
+            denominationUp_[index]->setText("▲");
+            denominationDown_[index] = new QToolButton(actions);
+            denominationDown_[index]->setText("▼");
+            denominationUp_[index]->setEnabled(false);
+            denominationDown_[index]->setEnabled(false);
+            connect(denominationUp_[index], &QToolButton::clicked, this, [this, denomination = denominations[index]] { adjustWagerAmount(denomination); });
+            connect(denominationDown_[index], &QToolButton::clicked, this, [this, denomination = denominations[index]] { adjustWagerAmount(-denomination); });
+            denominationLayout->addWidget(denominationUp_[index], 0, Qt::AlignHCenter);
+            denominationLayout->addWidget(new QLabel(QLocale().toString(denominations[index]), actions), 0, Qt::AlignHCenter);
+            denominationLayout->addWidget(denominationDown_[index], 0, Qt::AlignHCenter);
+            wagerLayout->addLayout(denominationLayout);
+        }
+        wagerLayout->addStretch(1);
+        actionLayout->addLayout(wagerLayout);
         layout->addWidget(actions);
         setCentralWidget(central);
         auto* connectionMenu = menuBar()->addMenu("Connection");
@@ -512,6 +587,14 @@ public:
         newGameAction_ = gameMenu->addAction("New Game…");
         newGameAction_->setEnabled(false);
         connect(newGameAction_, &QAction::triggered, this, [this] { newGame(); });
+        restartGameAction_ = gameMenu->addAction("Restart Game");
+        restartGameAction_->setEnabled(false);
+        connect(restartGameAction_, &QAction::triggered, this, [this] { restartGame(); });
+        auto* applicationMenu = menuBar()->addMenu("Application");
+        auto* settingsAction = applicationMenu->addAction("Settings…");
+        auto* aboutAction = applicationMenu->addAction("About BluffSkill");
+        connect(settingsAction, &QAction::triggered, this, [this] { editSettings(); });
+        connect(aboutAction, &QAction::triggered, this, [this] { showAbout(); });
         connect(competition_, &QComboBox::currentIndexChanged, this, [this] { refreshTables(); });
         connect(table_, &QComboBox::currentIndexChanged, this, [this] { refreshSeats(); });
         nextHandTimer_.setSingleShot(true);
@@ -519,6 +602,7 @@ public:
         connect(&nextDealCountdownTimer_, &QTimer::timeout, this, [this] { advanceNextDealCountdown(); });
         connect(&turnCountdownTimer_, &QTimer::timeout, this, [this] { advanceTurnCountdown(); });
         statusBar()->showMessage("Choose Connection → Connect… to begin.");
+        if (settings_.clientAutoConnect) QTimer::singleShot(0, this, [this] { autoConnectNext(); });
     }
 
 private:
@@ -552,6 +636,20 @@ private:
         return url;
     }
 
+    void editSettings() {
+        SettingsDialog dialog(settings_, this);
+        if (dialog.exec() != QDialog::Accepted) return;
+        settings_ = dialog.settings(settings_);
+        bluffskill::app_config::AppConfig::save(settings_);
+        statusBar()->showMessage("Settings saved. New clock values apply to the next countdown.");
+    }
+
+    void showAbout() {
+        QMessageBox::about(this, "About BluffSkill",
+            "BluffSkill\nBuild: " + QStringLiteral(__DATE__ " " __TIME__)
+                + "\n\n© AzoneLayer · azonelayer.com\nLicensed under the MIT License.");
+    }
+
     void resetDisconnectedUi() {
         server_->clear();
         server_->addItem("Not connected");
@@ -565,20 +663,26 @@ private:
         clearHumanPlayer();
         disconnectAction_->setEnabled(false);
         newGameAction_->setEnabled(false);
+        restartGameAction_->setEnabled(false);
     }
 
     void connectToServer() {
-        ConnectionDialog dialog(this);
+        autoConnectInProgress_ = false;
+        ConnectionDialog dialog(settings_, this);
         if (dialog.exec() != QDialog::Accepted) return;
+        connectToEndpoint(dialog.serverUrl(), dialog.displayAddress(), false);
+    }
 
-        const auto address = dialog.displayAddress();
+    void connectToEndpoint(QUrl baseUrl, const QString& address, bool automatic) {
         const auto attempt = ++connectionGeneration_;
         if (healthReply_) healthReply_->abort();
         newGameAction_->setEnabled(false);
         statusBar()->showMessage("Connecting to " + address + "…");
-        auto* reply = track(network_.get(QNetworkRequest(dialog.healthUrl())));
+        auto healthUrl = baseUrl;
+        healthUrl.setPath("/v1/health");
+        auto* reply = track(network_.get(QNetworkRequest(healthUrl)));
         healthReply_ = reply;
-        connect(reply, &QNetworkReply::finished, this, [this, reply, address, baseUrl = dialog.serverUrl(), attempt] {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, address, baseUrl, attempt, automatic] {
             if (healthReply_ == reply) healthReply_ = nullptr;
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const auto response = reply->readAll();
@@ -592,6 +696,10 @@ private:
             if (attempt != connectionGeneration_) return;
 
             if (!connected) {
+                if (automatic && autoConnectInProgress_) {
+                    autoConnectNext();
+                    return;
+                }
                 statusBar()->showMessage("Could not connect to " + address);
                 const auto detail = status > 0 ? "The server returned HTTP " + QString::number(status) + "." : error;
                 QMessageBox::warning(this, "Server unavailable",
@@ -601,6 +709,7 @@ private:
             }
 
             connected_ = true;
+            autoConnectInProgress_ = false;
             serverUrl_ = baseUrl;
             clearHumanPlayer();
             server_->setEnabled(true);
@@ -608,9 +717,29 @@ private:
             server_->addItem(address);
             disconnectAction_->setEnabled(true);
             newGameAction_->setEnabled(true);
+            restartGameAction_->setEnabled(true);
             statusBar()->showMessage("Connected to " + address);
             refreshCompetitions();
         });
+    }
+
+    void autoConnectNext() {
+        if (!settings_.clientAutoConnect) return;
+        if (!autoConnectInProgress_) {
+            autoConnectInProgress_ = true;
+            autoConnectPortIndex_ = 0;
+        }
+        if (autoConnectPortIndex_ >= settings_.serverPreferredPorts.size()) {
+            autoConnectInProgress_ = false;
+            statusBar()->showMessage("No preferred local server was found.");
+            return;
+        }
+        const auto port = settings_.serverPreferredPorts.at(autoConnectPortIndex_++);
+        QUrl url;
+        url.setScheme("http");
+        url.setHost("127.0.0.1");
+        url.setPort(port);
+        connectToEndpoint(url, "127.0.0.1:" + QString::number(port), true);
     }
 
     void disconnectFromServer() {
@@ -622,6 +751,7 @@ private:
         network_.clearAccessCache();
         network_.clearConnectionCache();
         connected_ = false;
+        autoConnectInProgress_ = false;
         stopNextDealCountdown();
         stopTurnCountdown();
         serverUrl_ = QUrl{};
@@ -747,6 +877,7 @@ private:
     void applyTableView(const QJsonObject& view) {
         pokerTable_->setTableView(view);
         tableSequence_ = view.value("sequence").toInteger();
+        lastStreet_ = view.value("street").toString();
         int remaining = 0;
         for (const auto& item : view.value("players").toArray()) {
             const auto player = item.toObject();
@@ -768,10 +899,13 @@ private:
         const auto minimum = legal.value("minimumAmount").toInteger();
         const auto maximum = legal.value("maximumAmount").toInteger();
         const auto canSetAmount = humanPlayer_ && (legal.value("bet").toBool() || legal.value("raise").toBool()) && maximum >= minimum;
-        amount_->setEnabled(canSetAmount);
+        wagerMinimum_ = minimum;
+        wagerMaximum_ = maximum;
+        setWagerControlsEnabled(canSetAmount);
         if (canSetAmount) {
-            amount_->setRange(static_cast<int>(std::min<qint64>(minimum, 1000000000)), static_cast<int>(std::min<qint64>(maximum, 1000000000)));
-            amount_->setValue(static_cast<int>(std::min<qint64>(minimum, 1000000000)));
+            setWagerAmount(wagerMinimum_);
+        } else {
+            amountEdit_->clear();
         }
         wagerStatus_->setText("Current bet: " + QLocale().toString(currentBet) + " chips"
             + (humanPlayer_ && callAmount > 0 ? " · You need " + QLocale().toString(callAmount) + " to call" : ""));
@@ -780,8 +914,8 @@ private:
             stopTurnCountdown();
             const auto hadShowdown = view.value("showdownOccurred").toBool();
             actionStatus_->setText(hadShowdown
-                ? "Showdown complete. The revealed cards and each pot winner are on the table. The next hand starts in 10 seconds, or click the Dealer button now."
-                : "The hand ended by a fold. The winner and payout are on the table. The next hand starts in 10 seconds, or click the Dealer button now.");
+                ? "Showdown complete. The revealed cards and each pot winner are on the table. The next hand starts in " + QString::number(settings_.dealClockSeconds) + " seconds, or click the Dealer button now."
+                : "The hand ended by a fold. The winner and payout are on the table. The next hand starts in " + QString::number(settings_.dealClockSeconds) + " seconds, or click the Dealer button now.");
             if (lastShowdownSequence_ != tableSequence_) {
                 lastShowdownSequence_ = tableSequence_;
                 beginNextDealCountdown();
@@ -800,10 +934,40 @@ private:
         }
     }
 
+    void setWagerControlsEnabled(bool enabled) {
+        amountEdit_->setEnabled(enabled);
+        for (auto* button : denominationUp_) button->setEnabled(enabled);
+        for (auto* button : denominationDown_) button->setEnabled(enabled);
+    }
+
+    [[nodiscard]] qint64 wagerAmount() const {
+        bool valid = false;
+        const auto amount = amountEdit_->text().toLongLong(&valid);
+        return valid ? amount : 0;
+    }
+
+    void setWagerAmount(qint64 amount) {
+        const auto normalized = std::clamp(amount, wagerMinimum_, wagerMaximum_);
+        amountEdit_->setText(QString::number(normalized));
+    }
+
+    void normalizeWagerAmount() {
+        if (!amountEdit_->isEnabled()) return;
+        setWagerAmount(wagerAmount());
+    }
+
+    void adjustWagerAmount(qint64 adjustment) {
+        if (!amountEdit_->isEnabled()) return;
+        setWagerAmount(wagerAmount() + adjustment);
+    }
+
     void beginNextDealCountdown() {
-        nextDealSeconds_ = 10;
+        if (pauseReason_ == PauseReason::deal) { paused_ = false; pauseReason_ = PauseReason::none; }
+        nextDealSeconds_ = settings_.dealClockSeconds;
         nextDealIn_->setText(QString::number(nextDealSeconds_) + " s");
         dealNowButton_->setEnabled(true);
+        pausePlayButton_->setEnabled(true);
+        pausePlayButton_->setText("Pause");
         nextDealCountdownTimer_.start(1'000);
         nextHandTimer_.start(nextDealSeconds_ * 1'000);
     }
@@ -814,6 +978,8 @@ private:
         nextDealSeconds_ = 0;
         if (nextDealIn_) nextDealIn_->setText("—");
         if (dealNowButton_) dealNowButton_->setEnabled(false);
+        if (pauseReason_ == PauseReason::deal) { paused_ = false; pauseReason_ = PauseReason::none; }
+        if (turnSequence_ < 0) pausePlayButton_->setEnabled(false);
     }
 
     void advanceNextDealCountdown() {
@@ -834,10 +1000,12 @@ private:
             return;
         }
         turnSequence_ = tableSequence_;
-        turnSeconds_ = 60;
+        turnSeconds_ = settings_.playerClockSeconds;
         turnCanCheck_ = canCheck;
         turnCanFold_ = canFold;
         turnCountdownTimer_.start(1'000);
+        pausePlayButton_->setEnabled(true);
+        pausePlayButton_->setText("Pause");
     }
 
     void stopTurnCountdown() {
@@ -846,6 +1014,38 @@ private:
         turnSeconds_ = 0;
         turnCanCheck_ = false;
         turnCanFold_ = false;
+        if (pauseReason_ == PauseReason::turn) { paused_ = false; pauseReason_ = PauseReason::none; }
+        if (nextDealSeconds_ == 0) pausePlayButton_->setEnabled(false);
+    }
+
+    void togglePause() {
+        if (!paused_) {
+            if (turnCountdownTimer_.isActive()) {
+                turnCountdownTimer_.stop();
+                pauseReason_ = PauseReason::turn;
+                actionStatus_->setText("Game paused. Your turn. Act in " + QString::number(turnSeconds_) + " seconds.");
+            } else if (nextHandTimer_.isActive()) {
+                nextHandTimer_.stop();
+                nextDealCountdownTimer_.stop();
+                pauseReason_ = PauseReason::deal;
+                actionStatus_->setText("Game paused. Next deal in " + QString::number(nextDealSeconds_) + " seconds.");
+            } else {
+                return;
+            }
+            paused_ = true;
+            pausePlayButton_->setText("Play");
+            return;
+        }
+        paused_ = false;
+        if (pauseReason_ == PauseReason::turn) {
+            turnCountdownTimer_.start(1'000);
+            actionStatus_->setText("Your turn. Act in " + QString::number(turnSeconds_) + " seconds.");
+        } else if (pauseReason_ == PauseReason::deal) {
+            nextDealCountdownTimer_.start(1'000);
+            nextHandTimer_.start(nextDealSeconds_ * 1'000);
+        }
+        pauseReason_ = PauseReason::none;
+        pausePlayButton_->setText("Pause");
     }
 
     void advanceTurnCountdown() {
@@ -889,15 +1089,50 @@ private:
         });
     }
 
+    void restartGame() {
+        if (!connected_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        if (lastStreet_ != "Showdown") {
+            QMessageBox warning(this);
+            warning.setIcon(QMessageBox::Warning);
+            warning.setWindowTitle("Restart active game?");
+            warning.setText("The current hand is not finished. Restarting resets every stack and begins a new hand on this table.");
+            auto* restart = warning.addButton("Restart Game", QMessageBox::DestructiveRole);
+            warning.addButton(QMessageBox::Cancel);
+            warning.exec();
+            if (warning.clickedButton() != restart) return;
+        }
+        stopNextDealCountdown();
+        stopTurnCountdown();
+        const auto attempt = connectionGeneration_;
+        const auto path = "/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText() + "/restart";
+        auto* reply = postJson(path, QJsonObject{{"viewer", humanPlayer_ ? humanPlayer_->apiPlayerName() : QString{}}});
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto response = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            if (!success) {
+                QMessageBox::warning(this, "Restart failed", response.value("error").toString("The server could not restart this table."));
+                refreshTableView();
+                return;
+            }
+            applyTableView(response);
+            statusBar()->showMessage("The server restarted the current table.");
+        });
+    }
+
     void newGame() {
         if (!connected_) return;
         bool accepted = false;
-        const auto playerName = QInputDialog::getText(this, "Your player", "Player name:", QLineEdit::Normal, "Player", &accepted).trimmed();
+        const auto playerName = QInputDialog::getText(this, "Your player", "Player name:", QLineEdit::Normal, settings_.defaultPlayerName, &accepted).trimmed();
         if (!accepted) return;
         if (playerName.isEmpty()) {
             QMessageBox::warning(this, "Player name required", "Choose a name using letters, digits, and dashes.");
             return;
         }
+        settings_.defaultPlayerName = playerName;
+        bluffskill::app_config::AppConfig::save(settings_);
         const auto attempt = connectionGeneration_;
         pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName);
         newGameAction_->setEnabled(false);
@@ -980,9 +1215,9 @@ private:
         humanPlayer_->selectAction(humanAction);
         if (competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
         const auto amount = humanAction == bluffskill::client::HumanAction::bet || humanAction == bluffskill::client::HumanAction::raise
-            ? amount_->value() : 0;
+            ? wagerAmount() : 0;
         setActionControlsEnabled(false);
-        amount_->setEnabled(false);
+        setWagerControlsEnabled(false);
         actionStatus_->setText("Submitting " + bluffskill::client::HumanPlayer::displayName(humanAction) + "…");
         const auto attempt = connectionGeneration_;
         auto* reply = track(humanPlayer_->submitAction(network_, serverUrl_, competition_->currentText(), table_->currentText(), humanAction,
@@ -1018,7 +1253,8 @@ private:
         humanPlayer_.reset();
         pokerTable_->setLocalPlayerName({});
         setActionControlsEnabled(false);
-        amount_->setEnabled(false);
+        setWagerControlsEnabled(false);
+        amountEdit_->clear();
         tableSequence_ = 0;
         lastShowdownSequence_ = -1;
         nextHandRequestInFlight_ = false;
@@ -1029,6 +1265,9 @@ private:
     }
 
 private:
+    enum class PauseReason { none, turn, deal };
+
+    bluffskill::app_config::Settings settings_;
     QNetworkAccessManager network_{this};
     QSet<QNetworkReply*> activeReplies_;
     QNetworkReply* healthReply_{};
@@ -1039,12 +1278,16 @@ private:
     qint64 tableSequence_{};
     qint64 lastShowdownSequence_{-1};
     qint64 turnSequence_{-1};
+    QString lastStreet_;
     int nextDealSeconds_{};
     int turnSeconds_{};
     bool connected_{};
+    bool paused_{};
     bool nextHandRequestInFlight_{};
+    bool autoConnectInProgress_{};
     bool turnCanCheck_{};
     bool turnCanFold_{};
+    PauseReason pauseReason_{PauseReason::none};
     QTimer nextHandTimer_;
     QTimer nextDealCountdownTimer_;
     QTimer turnCountdownTimer_;
@@ -1057,10 +1300,17 @@ private:
     PokerTable* pokerTable_{};
     QLabel* actionStatus_{};
     QLabel* wagerStatus_{};
-    QSpinBox* amount_{};
+    QPushButton* pausePlayButton_{};
+    QLineEdit* amountEdit_{};
+    std::array<QToolButton*, 4> denominationUp_{};
+    std::array<QToolButton*, 4> denominationDown_{};
+    qint64 wagerMinimum_{};
+    qint64 wagerMaximum_{};
     std::vector<QPushButton*> actionButtons_;
     QAction* disconnectAction_{};
     QAction* newGameAction_{};
+    QAction* restartGameAction_{};
+    qsizetype autoConnectPortIndex_{};
     std::unique_ptr<bluffskill::client::HumanPlayer> pendingHumanPlayer_;
     std::unique_ptr<bluffskill::client::HumanPlayer> humanPlayer_;
 };

@@ -107,6 +107,7 @@ public:
     void seatPlayer(std::string name, PlayerKind kind, std::size_t seat, Chips stack);
     void startHand();
     void startNextHand();
+    void restartGame();
     [[nodiscard]] TableView viewFor(std::string_view viewerName = {}) const;
     [[nodiscard]] std::uint64_t eventSequence() const noexcept { return eventSequence_; }
     void submitAction(std::string_view playerName, Action action, Chips amount, std::uint64_t expectedSequence);

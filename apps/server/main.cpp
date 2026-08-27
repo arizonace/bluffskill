@@ -1,7 +1,11 @@
 #include "bluffskill/poker/house.hpp"
+#include "bluffskill/app_config/app_config.hpp"
 
 #include <QApplication>
 #include <QDateTime>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QHttpServer>
 #include <QHttpServerRequest>
 #include <QHttpServerResponse>
@@ -10,20 +14,70 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMainWindow>
+#include <QMenuBar>
+#include <QMessageBox>
+#include <QCheckBox>
+#include <QLineEdit>
 #include <QLocale>
 #include <QPlainTextEdit>
 #include <QSplitter>
+#include <QSpinBox>
 #include <QTcpServer>
 #include <QTableWidget>
 #include <QTreeWidget>
 #include <QUrlQuery>
 #include <QVBoxLayout>
 
+#include <array>
+
 namespace {
+
+class SettingsDialog final : public QDialog {
+public:
+    explicit SettingsDialog(const bluffskill::app_config::Settings& settings, QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle("BluffSkill Settings");
+        auto* layout = new QFormLayout(this);
+        playerClock_ = new QSpinBox(this); playerClock_->setRange(5, 3600); playerClock_->setValue(settings.playerClockSeconds);
+        dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
+        defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
+        autoConnect_ = new QCheckBox("Automatically try preferred localhost ports", this); autoConnect_->setChecked(settings.clientAutoConnect);
+        for (int index = 0; index < 3; ++index) {
+            ports_[index] = new QSpinBox(this); ports_[index]->setRange(1, 65535); ports_[index]->setValue(settings.serverPreferredPorts.value(index));
+        }
+        layout->addRow("Player Clock (seconds)", playerClock_);
+        layout->addRow("Deal Clock (seconds)", dealClock_);
+        layout->addRow("Default Player Name", defaultPlayerName_);
+        layout->addRow("Preferred Port 1", ports_[0]);
+        layout->addRow("Preferred Port 2", ports_[1]);
+        layout->addRow("Preferred Port 3", ports_[2]);
+        layout->addRow("Client AutoConnect", autoConnect_);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Save, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addRow(buttons);
+    }
+
+    [[nodiscard]] bluffskill::app_config::Settings settings(bluffskill::app_config::Settings value) const {
+        value.playerClockSeconds = playerClock_->value();
+        value.dealClockSeconds = dealClock_->value();
+        value.defaultPlayerName = defaultPlayerName_->text();
+        value.clientAutoConnect = autoConnect_->isChecked();
+        value.serverPreferredPorts.clear();
+        for (const auto* port : ports_) value.serverPreferredPorts.append(static_cast<quint16>(port->value()));
+        return value;
+    }
+
+private:
+    QSpinBox* playerClock_{};
+    QSpinBox* dealClock_{};
+    QLineEdit* defaultPlayerName_{};
+    QCheckBox* autoConnect_{};
+    std::array<QSpinBox*, 3> ports_{};
+};
 
 class ServerWindow final : public QMainWindow {
 public:
-    ServerWindow() {
+    explicit ServerWindow(bluffskill::app_config::Settings settings) : settings_(std::move(settings)) {
         setWindowTitle("BluffSkill Server");
         resize(1180, 600);
         auto* splitter = new QSplitter(this);
@@ -41,6 +95,11 @@ public:
         actionLog_->setAlternatingRowColors(true);
         splitter->setSizes({300, 380, 500});
         setCentralWidget(splitter);
+        auto* appMenu = menuBar()->addMenu("Application");
+        auto* settingsAction = appMenu->addAction("Settings…");
+        auto* aboutAction = appMenu->addAction("About BluffSkill Server");
+        connect(settingsAction, &QAction::triggered, this, [this] { editSettings(); });
+        connect(aboutAction, &QAction::triggered, this, [this] { showAbout(); });
         refreshTree();
     }
 
@@ -67,6 +126,20 @@ public:
     bluffskill::poker::House& house() noexcept { return house_; }
 
 private:
+    void editSettings() {
+        SettingsDialog dialog(settings_, this);
+        if (dialog.exec() != QDialog::Accepted) return;
+        settings_ = dialog.settings(settings_);
+        bluffskill::app_config::AppConfig::save(settings_);
+        QMessageBox::information(this, "Settings saved", "Settings are shared with the client. Preferred ports are used the next time the server starts.");
+    }
+
+    void showAbout() {
+        QMessageBox::about(this, "About BluffSkill Server",
+            "BluffSkill Server\nBuild: " + QStringLiteral(__DATE__ " " __TIME__)
+                + "\n\n© AzoneLayer · azonelayer.com\nLicensed under the MIT License.");
+    }
+
     void refreshActionLog() {
         actionLog_->setRowCount(0);
         for (const auto& competition : house_.competitions()) {
@@ -85,6 +158,7 @@ private:
     }
 
     bluffskill::poker::House house_;
+    bluffskill::app_config::Settings settings_;
     QTreeWidget* tree_{};
     QPlainTextEdit* log_{};
     QTableWidget* actionLog_{};
@@ -195,7 +269,8 @@ int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QCoreApplication::setOrganizationName("AzoneLayer");
     QCoreApplication::setOrganizationDomain("azonelayer.com");
-    ServerWindow window;
+    const auto settings = bluffskill::app_config::AppConfig::load();
+    ServerWindow window(settings);
     QHttpServer server;
 
     server.route("/v1/health", [&window] {
@@ -301,6 +376,21 @@ int main(int argc, char* argv[]) {
             }
         });
 
+    server.route("/v1/competitions/<arg>/tables/<arg>/restart", QHttpServerRequest::Method::Post,
+        [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            try {
+                const auto viewerName = QJsonDocument::fromJson(request.body()).object().value("viewer").toString();
+                window.house().restartTable(competitionName.toStdString(), tableName.toStdString());
+                const auto table = window.house().tableView(competitionName.toStdString(), tableName.toStdString(), viewerName.toStdString());
+                window.refreshTree();
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/restart → 200");
+                return tableViewResponse(table);
+            } catch (const std::exception& exception) {
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/restart → 409");
+                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
+            }
+        });
+
     server.route("/v1/competitions/<arg>/tables/<arg>/players", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
             const auto json = QJsonDocument::fromJson(request.body()).object();
@@ -332,7 +422,15 @@ int main(int argc, char* argv[]) {
         });
 
     QTcpServer tcpServer;
-    if (!tcpServer.listen(QHostAddress::LocalHost, 0) || !server.bind(&tcpServer)) return 1;
+    bool listening = false;
+    for (const auto port : settings.serverPreferredPorts) {
+        if (tcpServer.listen(QHostAddress::LocalHost, port)) {
+            listening = true;
+            break;
+        }
+    }
+    if (!listening && !tcpServer.listen(QHostAddress::LocalHost, 0)) return 1;
+    if (!server.bind(&tcpServer)) return 1;
     const auto port = tcpServer.serverPort();
     window.log("Listening on http://127.0.0.1:" + QString::number(port));
     window.log("Prototype REST endpoints: GET/POST /v1/competitions");

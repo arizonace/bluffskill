@@ -247,6 +247,32 @@ void Table::startNextHand() {
     startHand();
 }
 
+void Table::restartGame() {
+    for (auto& seat : seats_) {
+        seat.stack = startingStack_;
+        seat.handCommitted = 0;
+        seat.roundCommitted = 0;
+        seat.folded = false;
+        seat.allIn = false;
+        seat.pending = false;
+        seat.canRaise = true;
+        seat.holeCards.clear();
+    }
+    street_ = Street::waiting;
+    dealerSeat_.reset();
+    smallBlindSeat_.reset();
+    bigBlindSeat_.reset();
+    actingSeat_.reset();
+    currentBet_ = 0;
+    lastFullRaise_ = 0;
+    communityCards_.clear();
+    history_.clear();
+    payouts_.clear();
+    showdownOccurred_ = false;
+    deck_.reset();
+    startHand();
+}
+
 Table::Seat& Table::seatFor(std::string_view name) {
     const auto found = std::ranges::find_if(seats_, [name](const Seat& candidate) { return sameName(candidate.name, name); });
     if (found == seats_.end()) throw CommandError(CommandFailure::turnConflict, "player is not seated at this table");

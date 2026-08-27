@@ -93,4 +93,12 @@ int main() {
     assert(nextHand.street == Street::preflop);
     assert(nextHand.dealerSeat == 2);
     assert(nextHand.smallBlindSeat == 3);
+
+    rotation.restartGame();
+    const auto restarted = rotation.viewFor();
+    assert(restarted.street == Street::preflop);
+    assert(restarted.dealerSeat == 1);
+    assert(restarted.players[0].stack == 500);
+    assert(restarted.players[1].stack == 450);
+    assert(restarted.players[2].stack == 400);
 }
