@@ -40,6 +40,7 @@ struct CompetitionSummary {
 class House {
 public:
     // `House` is the one singleton per server process. The application owns it.
+    explicit House(BlindSchedule blindSchedule = {});
     [[nodiscard]] CompetitionSummary createSingleTableTournament(TournamentSpec spec);
     [[nodiscard]] CompetitionSummary createReferencePlayers(std::string_view competitionName, std::size_t count);
     [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
@@ -50,6 +51,7 @@ public:
         Action action, Chips amount, std::uint64_t expectedSequence);
     void startNextHand(std::string_view competitionName, std::string_view tableName);
     void restartTable(std::string_view competitionName, std::string_view tableName);
+    void setBlindSchedule(BlindSchedule blindSchedule);
 
 private:
     struct Competition {
@@ -76,6 +78,7 @@ private:
     void advanceReferencePlayers(Competition& competition, std::size_t tableIndex);
 
     std::mt19937_64 random_{std::random_device{}()};
+    BlindSchedule blindSchedule_;
     std::vector<Competition> competitions_;
 };
 

@@ -12,11 +12,15 @@ namespace {
 
 constexpr int defaultPlayerClockSeconds = 120;
 constexpr int defaultDealClockSeconds = 20;
+constexpr int defaultBlindHandsPerLevel = 16;
+constexpr int defaultBlindMinutesPerLevel = 20;
 constexpr quint16 defaultPorts[] = {53153, 53154, 53155};
 
 Settings normalized(Settings settings) {
     settings.playerClockSeconds = std::clamp(settings.playerClockSeconds, 5, 3'600);
     settings.dealClockSeconds = std::clamp(settings.dealClockSeconds, 1, 3'600);
+    settings.blindHandsPerLevel = std::clamp(settings.blindHandsPerLevel, 1, 10'000);
+    settings.blindMinutesPerLevel = std::clamp(settings.blindMinutesPerLevel, 1, 3'600);
     settings.defaultPlayerName = settings.defaultPlayerName.trimmed();
     if (settings.defaultPlayerName.isEmpty()) settings.defaultPlayerName = "Player";
 
@@ -46,6 +50,8 @@ Settings AppConfig::load() {
     Settings settings;
     settings.playerClockSeconds = store.value("timers/playerClockSeconds", defaultPlayerClockSeconds).toInt();
     settings.dealClockSeconds = store.value("timers/dealClockSeconds", defaultDealClockSeconds).toInt();
+    settings.blindHandsPerLevel = store.value("blinds/handsPerLevel", defaultBlindHandsPerLevel).toInt();
+    settings.blindMinutesPerLevel = store.value("blinds/minutesPerLevel", defaultBlindMinutesPerLevel).toInt();
     settings.defaultPlayerName = store.value("client/defaultPlayerName", settings.defaultPlayerName).toString();
     settings.clientAutoConnect = store.value("client/autoConnect", false).toBool();
     settings.serverPreferredPorts.clear();
@@ -66,6 +72,8 @@ void AppConfig::save(const Settings& input) {
     QSettings store(path, QSettings::IniFormat);
     store.setValue("timers/playerClockSeconds", settings.playerClockSeconds);
     store.setValue("timers/dealClockSeconds", settings.dealClockSeconds);
+    store.setValue("blinds/handsPerLevel", settings.blindHandsPerLevel);
+    store.setValue("blinds/minutesPerLevel", settings.blindMinutesPerLevel);
     store.setValue("client/defaultPlayerName", settings.defaultPlayerName);
     store.setValue("client/autoConnect", settings.clientAutoConnect);
     QStringList ports;

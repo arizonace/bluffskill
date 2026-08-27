@@ -11,8 +11,8 @@ namespace bluffskill::poker {
 
 namespace {
 
-constexpr Chips smallBlind = 50;
-constexpr Chips bigBlind = 100;
+constexpr Chips baseSmallBlind = 50;
+constexpr Chips baseBigBlind = 100;
 
 bool sameName(std::string_view left, std::string_view right) {
     return left == right;
@@ -119,9 +119,10 @@ std::string_view toString(Action action) noexcept {
     return "Unknown";
 }
 
-Table::Table(std::string name, std::size_t maximumSeats, Chips startingStack)
-    : name_(std::move(name)), maximumSeats_(maximumSeats), startingStack_(startingStack) {
+Table::Table(std::string name, std::size_t maximumSeats, Chips startingStack, BlindSchedule blindSchedule)
+    : name_(std::move(name)), maximumSeats_(maximumSeats), startingStack_(startingStack), blindSchedule_(blindSchedule) {
     if (maximumSeats_ == 0 || startingStack_ <= 0) throw std::invalid_argument("table requires seats and a positive starting stack");
+    setBlindSchedule(blindSchedule_);
 }
 
 Table::~Table() = default;
@@ -184,9 +185,40 @@ void Table::postBlind(Seat& seat, Chips amount, Action action) {
     history_.push_back({.player = seat.name, .seat = seat.number, .street = Street::preflop, .action = action, .amount = paid});
 }
 
+void Table::setBlindSchedule(BlindSchedule blindSchedule) {
+    if (blindSchedule.handsPerLevel == 0 || blindSchedule.minutesPerLevel.count() <= 0) {
+        throw std::invalid_argument("blind schedule requires positive hand and minute intervals");
+    }
+    blindSchedule_ = blindSchedule;
+}
+
+Chips Table::smallBlindAmount() const {
+    const auto multiplier = static_cast<Chips>(1) << std::min<std::size_t>(blindLevel_, 20);
+    return baseSmallBlind * multiplier;
+}
+
+Chips Table::bigBlindAmount() const {
+    const auto multiplier = static_cast<Chips>(1) << std::min<std::size_t>(blindLevel_, 20);
+    return baseBigBlind * multiplier;
+}
+
+void Table::advanceBlindLevelIfDue() {
+    const auto now = std::chrono::steady_clock::now();
+    if (!blindClockStarted_) {
+        blindLevelStartedAt_ = now;
+        return;
+    }
+    if (handsAtCurrentBlindLevel_ < blindSchedule_.handsPerLevel
+        && now - blindLevelStartedAt_ < blindSchedule_.minutesPerLevel) return;
+    ++blindLevel_;
+    handsAtCurrentBlindLevel_ = 0;
+    blindLevelStartedAt_ = now;
+}
+
 void Table::startHand() {
     if (street_ != Street::waiting) throw std::logic_error("a hand is already running");
     if (seats_.size() < 2) throw std::logic_error("at least two seated players are required");
+    advanceBlindLevelIfDue();
     for (auto& seat : seats_) {
         seat.handCommitted = 0;
         seat.roundCommitted = 0;
@@ -227,13 +259,15 @@ void Table::startHand() {
     }
     smallBlindSeat_ = small->number;
     bigBlindSeat_ = big->number;
-    postBlind(*small, smallBlind, Action::smallBlind);
-    postBlind(*big, bigBlind, Action::bigBlind);
+    postBlind(*small, smallBlindAmount(), Action::smallBlind);
+    postBlind(*big, bigBlindAmount(), Action::bigBlind);
     currentBet_ = big->roundCommitted;
-    lastFullRaise_ = bigBlind;
+    lastFullRaise_ = bigBlindAmount();
     for (auto& seat : seats_) seat.pending = !seat.folded && !seat.allIn;
     if (const auto* actor = nextPendingSeatAfter(big->number)) actingSeat_ = actor->number;
     else advanceStreet();
+    ++handsAtCurrentBlindLevel_;
+    blindClockStarted_ = true;
     ++eventSequence_;
 }
 
@@ -269,6 +303,10 @@ void Table::restartGame() {
     history_.clear();
     payouts_.clear();
     showdownOccurred_ = false;
+    blindLevel_ = 0;
+    handsAtCurrentBlindLevel_ = 0;
+    blindClockStarted_ = false;
+    blindLevelStartedAt_ = std::chrono::steady_clock::now();
     deck_.reset();
     startHand();
 }
@@ -294,8 +332,8 @@ LegalActions Table::legalActionsFor(const Seat& seat) const {
     legal.callAmount = std::min(owed, seat.stack);
     legal.maximumAmount = seat.roundCommitted + seat.stack;
     if (currentBet_ == 0) {
-        legal.bet = legal.maximumAmount >= bigBlind;
-        legal.minimumAmount = bigBlind;
+        legal.bet = legal.maximumAmount >= bigBlindAmount();
+        legal.minimumAmount = bigBlindAmount();
     } else {
         const auto fullRaiseTo = currentBet_ + lastFullRaise_;
         legal.raise = seat.canRaise && legal.maximumAmount > currentBet_;
@@ -325,7 +363,8 @@ std::vector<PotView> Table::pots() const {
 }
 
 TableView Table::viewFor(std::string_view viewerName) const {
-    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .currentBet = currentBet_, .dealerSeat = dealerSeat_,
+    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .currentBet = currentBet_,
+        .smallBlind = smallBlindAmount(), .bigBlind = bigBlindAmount(), .blindLevel = blindLevel_, .dealerSeat = dealerSeat_,
         .smallBlindSeat = smallBlindSeat_, .bigBlindSeat = bigBlindSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_,
         .pots = pots(), .payouts = payouts_, .showdownOccurred = showdownOccurred_, .actionHistory = history_};
     const auto* viewer = seatFor(viewerName);
@@ -411,7 +450,7 @@ void Table::setRoundPendingAfterDealer() {
         seat.canRaise = true;
     }
     currentBet_ = 0;
-    lastFullRaise_ = bigBlind;
+    lastFullRaise_ = bigBlindAmount();
     updateActor();
 }
 

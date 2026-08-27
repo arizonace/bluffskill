@@ -9,6 +9,8 @@
 
 namespace bluffskill::poker {
 
+House::House(BlindSchedule blindSchedule) : blindSchedule_(blindSchedule) {}
+
 std::string House::nextCompetitionName() const {
     constexpr std::array places{"Valhalla", "Toronto", "Westeros", "Pantheon", "Riverlands", "Solaris", "Mordor", "NorthPole"};
     const auto index = competitions_.size();
@@ -41,7 +43,7 @@ CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
     };
     Competition competition{.summary = std::move(summary)};
     competition.tables.push_back(std::make_unique<Table>(competition.summary.tables.front().name,
-        competition.summary.tables.front().maximumSeats, static_cast<Chips>(spec.startingStack)));
+        competition.summary.tables.front().maximumSeats, static_cast<Chips>(spec.startingStack), blindSchedule_));
     competitions_.push_back(std::move(competition));
     return summaryOf(competitions_.back());
 }
@@ -224,6 +226,13 @@ void House::restartTable(std::string_view competitionName, std::string_view tabl
     const auto tableIndex = findTableIndex(competition, tableName);
     competition.tables.at(tableIndex)->restartGame();
     advanceReferencePlayers(competition, tableIndex);
+}
+
+void House::setBlindSchedule(BlindSchedule blindSchedule) {
+    for (auto& competition : competitions_) {
+        for (auto& table : competition.tables) table->setBlindSchedule(blindSchedule);
+    }
+    blindSchedule_ = blindSchedule;
 }
 
 void House::advanceReferencePlayers(Competition& competition, std::size_t tableIndex) {

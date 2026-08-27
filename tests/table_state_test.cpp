@@ -101,4 +101,19 @@ int main() {
     assert(restarted.players[0].stack == 500);
     assert(restarted.players[1].stack == 450);
     assert(restarted.players[2].stack == 400);
+
+    Table blindLevels("Blind levels", 3, 1000, BlindSchedule{.handsPerLevel = 1, .minutesPerLevel = std::chrono::minutes{60}});
+    blindLevels.seatPlayer("A", PlayerKind::api, 1, 1000);
+    blindLevels.seatPlayer("B", PlayerKind::api, 2, 1000);
+    blindLevels.seatPlayer("C", PlayerKind::api, 3, 1000);
+    blindLevels.startHand();
+    assert(blindLevels.viewFor().smallBlind == 50);
+    auto blindView = blindLevels.viewFor("A");
+    blindLevels.submitAction("A", Action::fold, 0, blindView.eventSequence);
+    blindView = blindLevels.viewFor("B");
+    blindLevels.submitAction("B", Action::fold, 0, blindView.eventSequence);
+    blindLevels.startNextHand();
+    assert(blindLevels.viewFor().blindLevel == 1);
+    assert(blindLevels.viewFor().smallBlind == 100);
+    assert(blindLevels.viewFor().bigBlind == 200);
 }

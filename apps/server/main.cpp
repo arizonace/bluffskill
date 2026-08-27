@@ -29,6 +29,7 @@
 #include <QVBoxLayout>
 
 #include <array>
+#include <chrono>
 
 namespace {
 
@@ -39,6 +40,8 @@ public:
         auto* layout = new QFormLayout(this);
         playerClock_ = new QSpinBox(this); playerClock_->setRange(5, 3600); playerClock_->setValue(settings.playerClockSeconds);
         dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
+        blindHands_ = new QSpinBox(this); blindHands_->setRange(1, 10000); blindHands_->setValue(settings.blindHandsPerLevel);
+        blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
         autoConnect_ = new QCheckBox("Automatically try preferred localhost ports", this); autoConnect_->setChecked(settings.clientAutoConnect);
         for (int index = 0; index < 3; ++index) {
@@ -46,6 +49,8 @@ public:
         }
         layout->addRow("Player Clock (seconds)", playerClock_);
         layout->addRow("Deal Clock (seconds)", dealClock_);
+        layout->addRow("Blind Increase (hands)", blindHands_);
+        layout->addRow("Blind Increase (minutes)", blindMinutes_);
         layout->addRow("Default Player Name", defaultPlayerName_);
         layout->addRow("Preferred Port 1", ports_[0]);
         layout->addRow("Preferred Port 2", ports_[1]);
@@ -60,6 +65,8 @@ public:
     [[nodiscard]] bluffskill::app_config::Settings settings(bluffskill::app_config::Settings value) const {
         value.playerClockSeconds = playerClock_->value();
         value.dealClockSeconds = dealClock_->value();
+        value.blindHandsPerLevel = blindHands_->value();
+        value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
         value.clientAutoConnect = autoConnect_->isChecked();
         value.serverPreferredPorts.clear();
@@ -70,6 +77,8 @@ public:
 private:
     QSpinBox* playerClock_{};
     QSpinBox* dealClock_{};
+    QSpinBox* blindHands_{};
+    QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
     QCheckBox* autoConnect_{};
     std::array<QSpinBox*, 3> ports_{};
@@ -77,7 +86,9 @@ private:
 
 class ServerWindow final : public QMainWindow {
 public:
-    explicit ServerWindow(bluffskill::app_config::Settings settings) : settings_(std::move(settings)) {
+    explicit ServerWindow(bluffskill::app_config::Settings settings)
+        : house_({.handsPerLevel = static_cast<std::size_t>(settings.blindHandsPerLevel),
+                  .minutesPerLevel = std::chrono::minutes{settings.blindMinutesPerLevel}}), settings_(std::move(settings)) {
         setWindowTitle("BluffSkill Server");
         resize(1180, 600);
         auto* splitter = new QSplitter(this);
@@ -131,12 +142,16 @@ private:
         if (dialog.exec() != QDialog::Accepted) return;
         settings_ = dialog.settings(settings_);
         bluffskill::app_config::AppConfig::save(settings_);
-        QMessageBox::information(this, "Settings saved", "Settings are shared with the client. Preferred ports are used the next time the server starts.");
+        house_.setBlindSchedule({.handsPerLevel = static_cast<std::size_t>(settings_.blindHandsPerLevel),
+            .minutesPerLevel = std::chrono::minutes{settings_.blindMinutesPerLevel}});
+        QMessageBox::information(this, "Settings saved", "Settings are shared with the client. Blind levels use the new schedule; preferred ports are used the next time the server starts.");
     }
 
     void showAbout() {
         QMessageBox::about(this, "About BluffSkill Server",
-            "BluffSkill Server\nBuild: " + QStringLiteral(__DATE__ " " __TIME__)
+            "BluffSkill Server\nVersion: " + QStringLiteral(BLUFFSKILL_BUILD_VERSION)
+                + "\nBuild number: " + QStringLiteral(BLUFFSKILL_BUILD_NUMBER)
+                + "\nBuild timestamp: " + QStringLiteral(BLUFFSKILL_BUILD_TIMESTAMP)
                 + "\n\n© AzoneLayer · azonelayer.com\nLicensed under the MIT License.");
     }
 
@@ -237,6 +252,8 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
     return {{"name", QString::fromStdString(table.name)}, {"sequence", static_cast<qint64>(table.eventSequence)},
         {"street", QString::fromUtf8(bluffskill::poker::toString(table.street))},
         {"currentBet", static_cast<qint64>(table.currentBet)},
+        {"smallBlind", static_cast<qint64>(table.smallBlind)}, {"bigBlind", static_cast<qint64>(table.bigBlind)},
+        {"blindLevel", static_cast<qint64>(table.blindLevel)},
         {"dealerSeat", table.dealerSeat ? static_cast<int>(*table.dealerSeat) : 0},
         {"smallBlindSeat", table.smallBlindSeat ? static_cast<int>(*table.smallBlindSeat) : 0},
         {"bigBlindSeat", table.bigBlindSeat ? static_cast<int>(*table.bigBlindSeat) : 0},

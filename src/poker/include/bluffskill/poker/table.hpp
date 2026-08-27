@@ -5,6 +5,7 @@
 #include "bluffskill/poker/player.hpp"
 
 #include <cstdint>
+#include <chrono>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -15,6 +16,11 @@
 namespace bluffskill::poker {
 
 using Chips = std::int64_t;
+
+struct BlindSchedule {
+    std::size_t handsPerLevel{16};
+    std::chrono::minutes minutesPerLevel{20};
+};
 
 enum class Street { waiting, preflop, flop, turn, river, showdown };
 enum class Action { smallBlind, bigBlind, check, call, bet, raise, fold };
@@ -82,6 +88,9 @@ struct TableView {
     std::uint64_t eventSequence{0};
     Street street{Street::waiting};
     Chips currentBet{0}; // Largest commitment in the active betting round.
+    Chips smallBlind{0};
+    Chips bigBlind{0};
+    std::size_t blindLevel{0};
     std::optional<std::size_t> dealerSeat;
     std::optional<std::size_t> smallBlindSeat;
     std::optional<std::size_t> bigBlindSeat;
@@ -101,13 +110,14 @@ struct TableView {
 // Table is the poker-action serialization boundary. It has no Qt or transport dependency.
 class Table {
 public:
-    Table(std::string name, std::size_t maximumSeats, Chips startingStack);
+    Table(std::string name, std::size_t maximumSeats, Chips startingStack, BlindSchedule blindSchedule = {});
     ~Table();
 
     void seatPlayer(std::string name, PlayerKind kind, std::size_t seat, Chips stack);
     void startHand();
     void startNextHand();
     void restartGame();
+    void setBlindSchedule(BlindSchedule blindSchedule);
     [[nodiscard]] TableView viewFor(std::string_view viewerName = {}) const;
     [[nodiscard]] std::uint64_t eventSequence() const noexcept { return eventSequence_; }
     void submitAction(std::string_view playerName, Action action, Chips amount, std::uint64_t expectedSequence);
@@ -133,11 +143,19 @@ private:
     void updateActor();
     void finishByFold();
     void settleShowdown();
+    void advanceBlindLevelIfDue();
+    [[nodiscard]] Chips smallBlindAmount() const;
+    [[nodiscard]] Chips bigBlindAmount() const;
     [[nodiscard]] bool hasSingleLiveSeat() const;
 
     std::string name_;
     std::size_t maximumSeats_{0};
     Chips startingStack_{0};
+    BlindSchedule blindSchedule_;
+    std::size_t blindLevel_{0};
+    std::size_t handsAtCurrentBlindLevel_{0};
+    bool blindClockStarted_{false};
+    std::chrono::steady_clock::time_point blindLevelStartedAt_{std::chrono::steady_clock::now()};
     std::vector<Seat> seats_;
     Street street_{Street::waiting};
     std::optional<std::size_t> dealerSeat_;

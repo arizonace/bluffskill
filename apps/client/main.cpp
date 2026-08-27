@@ -397,6 +397,8 @@ public:
         auto* layout = new QFormLayout(this);
         playerClock_ = new QSpinBox(this); playerClock_->setRange(5, 3600); playerClock_->setValue(settings.playerClockSeconds);
         dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
+        blindHands_ = new QSpinBox(this); blindHands_->setRange(1, 10000); blindHands_->setValue(settings.blindHandsPerLevel);
+        blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
         autoConnect_ = new QCheckBox("Automatically try preferred localhost ports", this); autoConnect_->setChecked(settings.clientAutoConnect);
         for (int index = 0; index < 3; ++index) {
@@ -404,6 +406,8 @@ public:
         }
         layout->addRow("Player Clock (seconds)", playerClock_);
         layout->addRow("Deal Clock (seconds)", dealClock_);
+        layout->addRow("Blind Increase (hands)", blindHands_);
+        layout->addRow("Blind Increase (minutes)", blindMinutes_);
         layout->addRow("Default Player Name", defaultPlayerName_);
         layout->addRow("Preferred Port 1", ports_[0]);
         layout->addRow("Preferred Port 2", ports_[1]);
@@ -418,6 +422,8 @@ public:
     [[nodiscard]] bluffskill::app_config::Settings settings(bluffskill::app_config::Settings value) const {
         value.playerClockSeconds = playerClock_->value();
         value.dealClockSeconds = dealClock_->value();
+        value.blindHandsPerLevel = blindHands_->value();
+        value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
         value.clientAutoConnect = autoConnect_->isChecked();
         value.serverPreferredPorts.clear();
@@ -428,6 +434,8 @@ public:
 private:
     QSpinBox* playerClock_{};
     QSpinBox* dealClock_{};
+    QSpinBox* blindHands_{};
+    QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
     QCheckBox* autoConnect_{};
     std::array<QSpinBox*, 3> ports_{};
@@ -646,7 +654,9 @@ private:
 
     void showAbout() {
         QMessageBox::about(this, "About BluffSkill",
-            "BluffSkill\nBuild: " + QStringLiteral(__DATE__ " " __TIME__)
+            "BluffSkill\nVersion: " + QStringLiteral(BLUFFSKILL_BUILD_VERSION)
+                + "\nBuild number: " + QStringLiteral(BLUFFSKILL_BUILD_NUMBER)
+                + "\nBuild timestamp: " + QStringLiteral(BLUFFSKILL_BUILD_TIMESTAMP)
                 + "\n\n© AzoneLayer · azonelayer.com\nLicensed under the MIT License.");
     }
 
