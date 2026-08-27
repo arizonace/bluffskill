@@ -12,6 +12,8 @@ namespace {
 
 constexpr int defaultPlayerClockSeconds = 120;
 constexpr int defaultDealClockSeconds = 20;
+constexpr int defaultUninterruptedDealerDelayMilliseconds = 5'000;
+constexpr int defaultAutomatedPlayerDelayMilliseconds = 1'000;
 constexpr int defaultBlindHandsPerLevel = 16;
 constexpr int defaultBlindMinutesPerLevel = 20;
 constexpr quint16 defaultPorts[] = {53153, 53154, 53155};
@@ -19,6 +21,8 @@ constexpr quint16 defaultPorts[] = {53153, 53154, 53155};
 Settings normalized(Settings settings) {
     settings.playerClockSeconds = std::clamp(settings.playerClockSeconds, 5, 3'600);
     settings.dealClockSeconds = std::clamp(settings.dealClockSeconds, 1, 3'600);
+    settings.uninterruptedDealerDelayMilliseconds = std::clamp(settings.uninterruptedDealerDelayMilliseconds, 1, 3'600'000);
+    settings.automatedPlayerDelayMilliseconds = std::clamp(settings.automatedPlayerDelayMilliseconds, 1, 3'600'000);
     settings.blindHandsPerLevel = std::clamp(settings.blindHandsPerLevel, 1, 10'000);
     settings.blindMinutesPerLevel = std::clamp(settings.blindMinutesPerLevel, 1, 3'600);
     settings.defaultPlayerName = settings.defaultPlayerName.trimmed();
@@ -50,6 +54,8 @@ Settings AppConfig::load() {
     Settings settings;
     settings.playerClockSeconds = store.value("timers/playerClockSeconds", defaultPlayerClockSeconds).toInt();
     settings.dealClockSeconds = store.value("timers/dealClockSeconds", defaultDealClockSeconds).toInt();
+    settings.uninterruptedDealerDelayMilliseconds = store.value("timers/uninterruptedDealerDelayMilliseconds", defaultUninterruptedDealerDelayMilliseconds).toInt();
+    settings.automatedPlayerDelayMilliseconds = store.value("timers/automatedPlayerDelayMilliseconds", defaultAutomatedPlayerDelayMilliseconds).toInt();
     settings.blindHandsPerLevel = store.value("blinds/handsPerLevel", defaultBlindHandsPerLevel).toInt();
     settings.blindMinutesPerLevel = store.value("blinds/minutesPerLevel", defaultBlindMinutesPerLevel).toInt();
     settings.defaultPlayerName = store.value("client/defaultPlayerName", settings.defaultPlayerName).toString();
@@ -72,6 +78,8 @@ void AppConfig::save(const Settings& input) {
     QSettings store(path, QSettings::IniFormat);
     store.setValue("timers/playerClockSeconds", settings.playerClockSeconds);
     store.setValue("timers/dealClockSeconds", settings.dealClockSeconds);
+    store.setValue("timers/uninterruptedDealerDelayMilliseconds", settings.uninterruptedDealerDelayMilliseconds);
+    store.setValue("timers/automatedPlayerDelayMilliseconds", settings.automatedPlayerDelayMilliseconds);
     store.setValue("blinds/handsPerLevel", settings.blindHandsPerLevel);
     store.setValue("blinds/minutesPerLevel", settings.blindMinutesPerLevel);
     store.setValue("client/defaultPlayerName", settings.defaultPlayerName);

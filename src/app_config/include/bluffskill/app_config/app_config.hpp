@@ -8,6 +8,8 @@ namespace bluffskill::app_config {
 struct Settings {
     int playerClockSeconds{120};
     int dealClockSeconds{20};
+    int uninterruptedDealerDelayMilliseconds{5'000};
+    int automatedPlayerDelayMilliseconds{1'000};
     int blindHandsPerLevel{16};
     int blindMinutesPerLevel{20};
     QString defaultPlayerName{"Player"};

@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QHttpServer>
 #include <QHttpServerRequest>
@@ -30,6 +31,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 
 namespace {
 
@@ -40,6 +42,8 @@ public:
         auto* layout = new QFormLayout(this);
         playerClock_ = new QSpinBox(this); playerClock_->setRange(5, 3600); playerClock_->setValue(settings.playerClockSeconds);
         dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
+        uninterruptedDealerDelay_ = delaySpinBox(settings.uninterruptedDealerDelayMilliseconds, this);
+        automatedPlayerDelay_ = delaySpinBox(settings.automatedPlayerDelayMilliseconds, this);
         blindHands_ = new QSpinBox(this); blindHands_->setRange(1, 10000); blindHands_->setValue(settings.blindHandsPerLevel);
         blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
@@ -49,6 +53,8 @@ public:
         }
         layout->addRow("Player Clock (seconds)", playerClock_);
         layout->addRow("Deal Clock (seconds)", dealClock_);
+        layout->addRow("Uninterrupted Dealer Delay", uninterruptedDealerDelay_);
+        layout->addRow("Automated Player Delay", automatedPlayerDelay_);
         layout->addRow("Blind Increase (hands)", blindHands_);
         layout->addRow("Blind Increase (minutes)", blindMinutes_);
         layout->addRow("Default Player Name", defaultPlayerName_);
@@ -65,6 +71,8 @@ public:
     [[nodiscard]] bluffskill::app_config::Settings settings(bluffskill::app_config::Settings value) const {
         value.playerClockSeconds = playerClock_->value();
         value.dealClockSeconds = dealClock_->value();
+        value.uninterruptedDealerDelayMilliseconds = milliseconds(*uninterruptedDealerDelay_);
+        value.automatedPlayerDelayMilliseconds = milliseconds(*automatedPlayerDelay_);
         value.blindHandsPerLevel = blindHands_->value();
         value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
@@ -75,8 +83,24 @@ public:
     }
 
 private:
+    static QDoubleSpinBox* delaySpinBox(int milliseconds, QWidget* parent) {
+        auto* control = new QDoubleSpinBox(parent);
+        control->setRange(0.001, 3'600.0);
+        control->setDecimals(3);
+        control->setSingleStep(0.100);
+        control->setSuffix(" seconds");
+        control->setValue(static_cast<double>(milliseconds) / 1'000.0);
+        return control;
+    }
+
+    static int milliseconds(const QDoubleSpinBox& control) {
+        return static_cast<int>(std::llround(control.value() * 1'000.0));
+    }
+
     QSpinBox* playerClock_{};
     QSpinBox* dealClock_{};
+    QDoubleSpinBox* uninterruptedDealerDelay_{};
+    QDoubleSpinBox* automatedPlayerDelay_{};
     QSpinBox* blindHands_{};
     QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};

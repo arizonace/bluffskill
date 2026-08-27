@@ -27,6 +27,10 @@ ctest --test-dir build --output-on-failure
 
 Run either application from `build/apps/server/` or `build/apps/client/`. The server chooses a free localhost port and prints it in its visible console.
 
+## Development workflow
+
+- Before changing a repository, check its working-tree status. Warn the user when it is dirty unless they have explicitly asked to work with uncommitted changes. Preserve every existing change and never commit on the user's behalf.
+
 ## Local macOS app bundles
 
 The normal build remains the cross-platform development build. On macOS, create local `.app` bundles only after it succeeds:

@@ -109,6 +109,9 @@ int main() {
     assert(foldedHand.payouts[0].awards.size() == 1);
     assert(foldedHand.payouts[0].awards[0].seat == 3);
     assert(foldedHand.players[2].holeCards.empty());
+    const auto foldedViewer = rotation.viewFor("One");
+    assert(foldedViewer.players[0].holeCards.size() == 2);
+    assert(!foldedViewer.players[0].showdownDescription.empty());
     rotation.startNextHand();
     const auto nextHand = rotation.viewFor();
     assert(nextHand.street == Street::preflop);

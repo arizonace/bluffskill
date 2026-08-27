@@ -110,6 +110,30 @@ std::string describeHand(const HandRank& rank) {
     }
 }
 
+std::string describePartialHand(const std::vector<cards::Card>& cards) {
+    std::array<int, 15> counts{};
+    for (const auto card : cards) ++counts[static_cast<int>(card.rank)];
+    std::vector<int> pairs;
+    std::vector<int> singles;
+    int triple = 0;
+    int quad = 0;
+    for (int rank = 14; rank >= 2; --rank) {
+        if (counts[rank] == 4) quad = rank;
+        else if (counts[rank] == 3) triple = rank;
+        else if (counts[rank] == 2) pairs.push_back(rank);
+        else if (counts[rank] == 1) singles.push_back(rank);
+    }
+    if (quad) return "Quad(" + rankName(quad) + ")" + (singles.empty() ? "" : ", " + joinRanks(singles));
+    if (triple) return "Set(" + rankName(triple) + ")" + (singles.empty() ? "" : ", " + joinRanks(singles));
+    if (pairs.size() >= 2) return "Two Pair(" + rankName(pairs[0]) + ',' + rankName(pairs[1]) + ")" + (singles.empty() ? "" : ", " + joinRanks(singles));
+    if (pairs.size() == 1) return "Pair(" + rankName(pairs[0]) + ")" + (singles.empty() ? "" : ", " + joinRanks(singles));
+    return singles.empty() ? std::string{} : "High(" + rankName(singles[0]) + ")" + (singles.size() == 1 ? "" : ", " + joinRanks(singles, 1));
+}
+
+std::string describeAvailableHand(const std::vector<cards::Card>& cards) {
+    return cards.size() >= 5 ? describeHand(bestHand(cards)) : describePartialHand(cards);
+}
+
 } // namespace
 
 struct Table::Seat {
@@ -424,10 +448,10 @@ TableView Table::viewFor(std::string_view viewerName) const {
                                .folded = seat.folded, .dealer = dealerSeat_ && *dealerSeat_ == seat.number,
                                .acting = actingSeat_ && *actingSeat_ == seat.number};
         if (viewer == &seat || (showdownOccurred_ && !seat.folded)) player.holeCards = seat.holeCards;
-        if (showdownOccurred_ && !seat.folded) {
+        if ((showdownOccurred_ && !seat.folded) || (viewer == &seat && street_ == Street::showdown)) {
             std::vector<cards::Card> cards = communityCards_;
             cards.insert(cards.end(), seat.holeCards.begin(), seat.holeCards.end());
-            player.showdownDescription = describeHand(bestHand(cards));
+            player.showdownDescription = describeAvailableHand(cards);
         }
         view.players.push_back(std::move(player));
     }
