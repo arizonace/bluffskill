@@ -29,7 +29,7 @@ Run either application from `build/apps/server/` or `build/apps/client/`. The se
 
 ## Development workflow
 
-- Before changing a repository, check its working-tree status. Warn the user when it is dirty unless they have explicitly asked to work with uncommitted changes. Preserve every existing change and never commit on the user's behalf.
+- Before changing a repository, check its working-tree status. Warn when it has uncommitted changes unless the user has explicitly asked to work with them. No warning is necessary for committed changes that have not yet been pushed. Preserve every existing change and never commit on the user's behalf.
 
 ## Local macOS app bundles
 
