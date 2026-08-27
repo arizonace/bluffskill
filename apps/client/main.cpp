@@ -34,6 +34,7 @@
 #include <QTimer>
 #include <QLineEdit>
 #include <QLocale>
+#include <QVector>
 
 #include <memory>
 #include <algorithm>
@@ -51,8 +52,10 @@ public:
     }
 
     void setPlayers(const QJsonArray& players) {
+        hasTableState_ = false;
         playerNames_.fill({});
         playerStacks_.fill(0);
+        playerCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
         playerFolded_.fill(false);
@@ -71,8 +74,10 @@ public:
     }
 
     void clearPlayers() {
+        hasTableState_ = false;
         playerNames_.fill({});
         playerStacks_.fill(0);
+        playerCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
         playerFolded_.fill(false);
@@ -91,8 +96,10 @@ public:
     }
 
     void setTableView(const QJsonObject& table) {
+        hasTableState_ = true;
         playerNames_.fill({});
         playerStacks_.fill(0);
+        playerCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
         playerFolded_.fill(false);
@@ -107,6 +114,7 @@ public:
                 const auto index = static_cast<std::size_t>(seat - 1);
                 playerNames_[index] = player.value("name").toString();
                 playerStacks_[index] = player.value("stack").toInteger();
+                playerCommitted_[index] = player.value("committed").toInteger();
                 playerActing_[index] = player.value("acting").toBool();
                 playerDealer_[index] = player.value("dealer").toBool();
                 playerFolded_[index] = player.value("folded").toBool();
@@ -174,7 +182,8 @@ protected:
         painter.setFont(QFont("Helvetica", 12));
         for (std::size_t i = 0; i < seats.size(); ++i) {
             const auto point = QPointF(width() * seats[i].x(), height() * seats[i].y());
-            painter.setBrush(QColor("#162D24"));
+            const auto busted = hasTableState_ && !playerNames_[i].isEmpty() && playerStacks_[i] == 0 && playerCommitted_[i] == 0;
+            painter.setBrush(busted ? QColor("#454545") : QColor("#162D24"));
             const auto localPlayer = !localPlayerName_.isEmpty() && playerNames_[i] == localPlayerName_;
             if (localPlayer) {
                 localPoint = point;
@@ -197,16 +206,23 @@ protected:
             const auto vector = point - felt.center();
             const auto length = std::hypot(vector.x(), vector.y());
             const auto direction = length > 0.01 ? QPointF(vector.x() / length, vector.y() / length) : QPointF(0, 1);
-            const auto marker = point - direction * 58;
-            if (playerFolded_[i]) drawFoldedMarker(painter, marker + direction * 13);
-            if (playerDealer_[i]) {
-                const auto button = drawBadge(painter, marker - direction * 8, "D", Qt::white, QColor("#263126"));
-                if (street_ == "Showdown") dealerButtonRect_ = button;
+            const auto front = point - direction * 59;
+            const auto side = QPointF(-direction.y(), direction.x());
+            const auto blind = playerSmallBlind_[i] ? RoleButton::smallBlind
+                : playerBigBlind_[i] ? RoleButton::bigBlind : RoleButton::none;
+            if (playerFolded_[i]) drawFoldedMarker(painter, point - direction * 28);
+            if (playerDealer_[i] && blind != RoleButton::none) {
+                const auto dealerButton = drawRoleButton(painter, front - side * 17, RoleButton::dealer);
+                drawRoleButton(painter, front + side * 17, blind);
+                if (street_ == "Showdown") dealerButtonRect_ = dealerButton;
+            } else if (playerDealer_[i]) {
+                const auto dealerButton = drawRoleButton(painter, front, RoleButton::dealer);
+                if (street_ == "Showdown") dealerButtonRect_ = dealerButton;
+            } else if (blind != RoleButton::none) {
+                drawRoleButton(painter, front, blind);
             }
-            if (playerSmallBlind_[i]) drawBadge(painter, marker, "Small Blind", QColor("#377DE6"), Qt::white);
-            if (playerBigBlind_[i]) drawBadge(painter, marker, "Big Blind", QColor("#D13A3A"), Qt::white);
-            drawPayoutStacks(painter, marker - direction * 25, payoutStacks_[i]);
-            if (showdownOccurred_ && !playerHoleCards_[i].isEmpty()) drawCardRow(painter, playerHoleCards_[i], marker - direction * 47, 27, 38);
+            drawPayoutStacks(painter, front - direction * 25, payoutStacks_[i]);
+            if (showdownOccurred_ && !playerHoleCards_[i].isEmpty()) drawCardRow(painter, playerHoleCards_[i], front - direction * 47, 27, 38);
         }
         if (hasLocalSeat && !localHoleCards_.isEmpty() && !showdownOccurred_) drawHoleCards(painter, felt, localPoint);
     }
@@ -226,6 +242,8 @@ private:
         QString suit;
         QColor color;
     };
+
+    enum class RoleButton { none, dealer, smallBlind, bigBlind };
 
     [[nodiscard]] static QString chips(qint64 amount) { return QLocale().toString(amount); }
 
@@ -264,24 +282,35 @@ private:
         }
     }
 
-    static QRectF drawBadge(QPainter& painter, QPointF center, const QString& text, const QColor& fill, const QColor& textColor) {
+    static QRectF drawRoleButton(QPainter& painter, QPointF center, RoleButton role) {
+        const auto dealer = role == RoleButton::dealer;
+        const auto fill = dealer ? QColor("#F9F9F6") : role == RoleButton::smallBlind ? QColor("#2B45C8") : QColor("#F2B928");
+        const auto textColor = dealer ? QColor("#283229") : Qt::white;
+        const auto text = dealer ? "DEALER" : role == RoleButton::smallBlind ? "SMALL\nBLIND" : "BIG\nBLIND";
+        const auto diameter = dealer ? 31.0 : 34.0;
+        const QRectF rect(center.x() - diameter / 2.0, center.y() - diameter / 2.0, diameter, diameter);
         painter.save();
-        painter.setFont(QFont("Helvetica", text == "D" ? 11 : 8, QFont::Bold));
-        const auto rect = text == "D" ? QRectF(center.x() - 11, center.y() - 11, 22, 22)
-            : QRectF(center.x() - 28, center.y() - 10, 56, 20);
-        painter.setPen(QPen(QColor("#F2E3B6"), 1));
+        painter.setFont(QFont("Helvetica", dealer ? 6 : 6, QFont::Bold));
+        painter.setPen(QPen(dealer ? QColor("#B5B5AE") : QColor("#EEDB8C"), 1));
         painter.setBrush(fill);
-        painter.drawRoundedRect(rect, text == "D" ? 11 : 8, text == "D" ? 11 : 8);
+        painter.drawEllipse(rect);
         painter.setPen(textColor);
-        painter.drawText(rect, Qt::AlignCenter, text);
+        painter.drawText(rect.adjusted(2, 2, -2, -2), Qt::AlignCenter | Qt::TextWordWrap, text);
         painter.restore();
         return rect;
     }
 
     void drawFoldedMarker(QPainter& painter, QPointF center) const {
-        const QRectF target(center.x() - 18, center.y() - 13, 36, 26);
+        const QRectF target(center.x() - 23, center.y() - 16, 46, 32);
         if (!foldedHands_.isNull()) painter.drawPixmap(target.toRect(), foldedHands_);
-        else drawBadge(painter, center, "Folded", QColor("#EED9C4"), QColor("#523018"));
+        else {
+            painter.save();
+            painter.setPen(QColor("#523018"));
+            painter.setBrush(QColor("#EED9C4"));
+            painter.drawRoundedRect(target, 8, 8);
+            painter.drawText(target, Qt::AlignCenter, "Folded");
+            painter.restore();
+        }
     }
 
     static void drawPayoutStacks(QPainter& painter, QPointF center, const QVector<qint64>& payouts) {
@@ -333,6 +362,7 @@ private:
 
     std::array<QString, 8> playerNames_{};
     std::array<qint64, 8> playerStacks_{};
+    std::array<qint64, 8> playerCommitted_{};
     std::array<bool, 8> playerActing_{};
     std::array<bool, 8> playerDealer_{};
     std::array<bool, 8> playerFolded_{};
@@ -348,6 +378,7 @@ private:
     QString street_;
     QString resultText_;
     bool showdownOccurred_{};
+    bool hasTableState_{};
     QPixmap foldedHands_{":/bluffskill/resources/folded_hands.png"};
     QRectF dealerButtonRect_;
     std::function<void()> dealerAdvanceHandler_;
@@ -409,11 +440,38 @@ public:
         auto* central = new QWidget(this);
         auto* layout = new QVBoxLayout(central);
         auto* connection = new QFrame(central);
-        auto* form = new QFormLayout(connection);
+        auto* connectionLayout = new QVBoxLayout(connection);
+        connectionLayout->setContentsMargins(0, 0, 0, 0);
+        auto* connectionRow = new QHBoxLayout;
         server_ = new QComboBox(connection); server_->addItem("Not connected"); server_->setEnabled(false);
         competition_ = new QComboBox(connection); competition_->addItem("Choose a server first"); competition_->setEnabled(false);
         table_ = new QComboBox(connection); table_->addItem("Choose a competition first"); table_->setEnabled(false);
-        form->addRow("Server", server_); form->addRow("Competition", competition_); form->addRow("Table", table_);
+        connectionRow->addWidget(new QLabel("Server", connection));
+        connectionRow->addWidget(server_, 1);
+        connectionRow->addSpacing(14);
+        connectionRow->addWidget(new QLabel("Competition", connection));
+        connectionRow->addWidget(competition_, 1);
+        connectionRow->addSpacing(14);
+        connectionRow->addWidget(new QLabel("Table", connection));
+        connectionRow->addWidget(table_, 1);
+        connectionLayout->addLayout(connectionRow);
+        auto* dealRow = new QHBoxLayout;
+        dealRow->addWidget(new QLabel("Remaining Players", connection));
+        remainingPlayers_ = new QLabel("—", connection);
+        remainingPlayers_->setMinimumWidth(42);
+        dealRow->addWidget(remainingPlayers_);
+        dealRow->addSpacing(30);
+        dealRow->addWidget(new QLabel("Next Deal In", connection));
+        nextDealIn_ = new QLabel("—", connection);
+        nextDealIn_->setMinimumWidth(44);
+        dealRow->addWidget(nextDealIn_);
+        dealRow->addSpacing(12);
+        dealNowButton_ = new QPushButton("Deal Now", connection);
+        dealNowButton_->setEnabled(false);
+        connect(dealNowButton_, &QPushButton::clicked, this, [this] { startNextHand(); });
+        dealRow->addWidget(dealNowButton_);
+        dealRow->addStretch(1);
+        connectionLayout->addLayout(dealRow);
         layout->addWidget(connection);
         pokerTable_ = new PokerTable(central);
         pokerTable_->setDealerAdvanceHandler([this] { startNextHand(); });
@@ -458,6 +516,8 @@ public:
         connect(table_, &QComboBox::currentIndexChanged, this, [this] { refreshSeats(); });
         nextHandTimer_.setSingleShot(true);
         connect(&nextHandTimer_, &QTimer::timeout, this, [this] { startNextHand(); });
+        connect(&nextDealCountdownTimer_, &QTimer::timeout, this, [this] { advanceNextDealCountdown(); });
+        connect(&turnCountdownTimer_, &QTimer::timeout, this, [this] { advanceTurnCountdown(); });
         statusBar()->showMessage("Choose Connection → Connect… to begin.");
     }
 
@@ -562,7 +622,8 @@ private:
         network_.clearAccessCache();
         network_.clearConnectionCache();
         connected_ = false;
-        nextHandTimer_.stop();
+        stopNextDealCountdown();
+        stopTurnCountdown();
         serverUrl_ = QUrl{};
         resetDisconnectedUi();
         statusBar()->showMessage("Disconnected.");
@@ -686,6 +747,12 @@ private:
     void applyTableView(const QJsonObject& view) {
         pokerTable_->setTableView(view);
         tableSequence_ = view.value("sequence").toInteger();
+        int remaining = 0;
+        for (const auto& item : view.value("players").toArray()) {
+            const auto player = item.toObject();
+            if (player.value("stack").toInteger() > 0 || player.value("committed").toInteger() > 0) ++remaining;
+        }
+        remainingPlayers_->setText(QString::number(remaining));
         const auto legal = view.value("legalActions").toObject();
         const auto currentBet = view.value("currentBet").toInteger();
         const auto callAmount = legal.value("callAmount").toInteger();
@@ -710,28 +777,98 @@ private:
             + (humanPlayer_ && callAmount > 0 ? " · You need " + QLocale().toString(callAmount) + " to call" : ""));
         const auto handFinished = view.value("street").toString() == "Showdown";
         if (handFinished) {
+            stopTurnCountdown();
             const auto hadShowdown = view.value("showdownOccurred").toBool();
             actionStatus_->setText(hadShowdown
                 ? "Showdown complete. The revealed cards and each pot winner are on the table. The next hand starts in 10 seconds, or click the Dealer button now."
                 : "The hand ended by a fold. The winner and payout are on the table. The next hand starts in 10 seconds, or click the Dealer button now.");
             if (lastShowdownSequence_ != tableSequence_) {
                 lastShowdownSequence_ = tableSequence_;
-                nextHandTimer_.start(10'000);
+                beginNextDealCountdown();
             }
         } else {
-            nextHandTimer_.stop();
+            stopNextDealCountdown();
             lastShowdownSequence_ = -1;
             if (!humanPlayer_) actionStatus_->setText("Choose a local player through New Game to view private cards and act.");
-            else if (anyAction) actionStatus_->setText("Your turn. Select one of the server-approved actions.");
-            else actionStatus_->setText("Waiting for " + view.value("actingSeat").toVariant().toString() + " to act.");
+            else if (anyAction) {
+                beginTurnCountdown(legal);
+                actionStatus_->setText("Your turn. Act in " + QString::number(turnSeconds_) + " seconds.");
+            } else {
+                stopTurnCountdown();
+                actionStatus_->setText("Waiting for " + view.value("actingSeat").toVariant().toString() + " to act.");
+            }
         }
+    }
+
+    void beginNextDealCountdown() {
+        nextDealSeconds_ = 10;
+        nextDealIn_->setText(QString::number(nextDealSeconds_) + " s");
+        dealNowButton_->setEnabled(true);
+        nextDealCountdownTimer_.start(1'000);
+        nextHandTimer_.start(nextDealSeconds_ * 1'000);
+    }
+
+    void stopNextDealCountdown() {
+        nextHandTimer_.stop();
+        nextDealCountdownTimer_.stop();
+        nextDealSeconds_ = 0;
+        if (nextDealIn_) nextDealIn_->setText("—");
+        if (dealNowButton_) dealNowButton_->setEnabled(false);
+    }
+
+    void advanceNextDealCountdown() {
+        if (nextDealSeconds_ <= 0) {
+            nextDealCountdownTimer_.stop();
+            return;
+        }
+        --nextDealSeconds_;
+        nextDealIn_->setText(QString::number(nextDealSeconds_) + " s");
+    }
+
+    void beginTurnCountdown(const QJsonObject& legal) {
+        const auto canCheck = legal.value("check").toBool();
+        const auto canFold = legal.value("fold").toBool();
+        if (turnSequence_ == tableSequence_) {
+            turnCanCheck_ = canCheck;
+            turnCanFold_ = canFold;
+            return;
+        }
+        turnSequence_ = tableSequence_;
+        turnSeconds_ = 60;
+        turnCanCheck_ = canCheck;
+        turnCanFold_ = canFold;
+        turnCountdownTimer_.start(1'000);
+    }
+
+    void stopTurnCountdown() {
+        turnCountdownTimer_.stop();
+        turnSequence_ = -1;
+        turnSeconds_ = 0;
+        turnCanCheck_ = false;
+        turnCanFold_ = false;
+    }
+
+    void advanceTurnCountdown() {
+        if (turnSequence_ != tableSequence_ || !humanPlayer_) {
+            stopTurnCountdown();
+            return;
+        }
+        if (turnSeconds_ > 0) --turnSeconds_;
+        if (turnSeconds_ > 0) {
+            actionStatus_->setText("Your turn. Act in " + QString::number(turnSeconds_) + " seconds.");
+            return;
+        }
+        turnCountdownTimer_.stop();
+        if (turnCanCheck_) selectHumanAction("Check");
+        else if (turnCanFold_) selectHumanAction("Fold");
+        else refreshTableView();
     }
 
     void startNextHand() {
         if (!connected_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
         if (nextHandRequestInFlight_) return;
         nextHandRequestInFlight_ = true;
-        nextHandTimer_.stop();
+        stopNextDealCountdown();
         const auto attempt = connectionGeneration_;
         const auto path = "/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText() + "/next-hand";
         auto* reply = postJson(path, QJsonObject{{"viewer", humanPlayer_ ? humanPlayer_->apiPlayerName() : QString{}}});
@@ -833,6 +970,7 @@ private:
 
     void selectHumanAction(const char* actionName) {
         if (!humanPlayer_) return;
+        stopTurnCountdown();
         const auto action = QString::fromUtf8(actionName);
         const auto humanAction = action == "Check" ? bluffskill::client::HumanAction::check
             : action == "Call" ? bluffskill::client::HumanAction::call
@@ -884,7 +1022,8 @@ private:
         tableSequence_ = 0;
         lastShowdownSequence_ = -1;
         nextHandRequestInFlight_ = false;
-        nextHandTimer_.stop();
+        stopNextDealCountdown();
+        stopTurnCountdown();
         actionStatus_->setText("No human player is attached.");
         wagerStatus_->setText("Current bet: 0 chips");
     }
@@ -899,12 +1038,22 @@ private:
     std::uint64_t tableViewRequestGeneration_{};
     qint64 tableSequence_{};
     qint64 lastShowdownSequence_{-1};
+    qint64 turnSequence_{-1};
+    int nextDealSeconds_{};
+    int turnSeconds_{};
     bool connected_{};
     bool nextHandRequestInFlight_{};
+    bool turnCanCheck_{};
+    bool turnCanFold_{};
     QTimer nextHandTimer_;
+    QTimer nextDealCountdownTimer_;
+    QTimer turnCountdownTimer_;
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};
+    QLabel* remainingPlayers_{};
+    QLabel* nextDealIn_{};
+    QPushButton* dealNowButton_{};
     PokerTable* pokerTable_{};
     QLabel* actionStatus_{};
     QLabel* wagerStatus_{};
@@ -920,6 +1069,8 @@ private:
 
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
+    QCoreApplication::setOrganizationName("AzoneLayer");
+    QCoreApplication::setOrganizationDomain("azonelayer.com");
     ClientWindow window;
     window.show();
     return application.exec();

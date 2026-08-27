@@ -19,14 +19,14 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND}
             "-DBUNDLE_PATH=$<TARGET_FILE_DIR:bluffskill-server>/BluffSkill Server.app"
             "-DBUNDLE_NAME=BluffSkill Server"
-            "-DBUNDLE_IDENTIFIER=com.bluffskill.server"
+            "-DBUNDLE_IDENTIFIER=com.azonelayer.bluffskill.server"
             "-DBUNDLE_EXECUTABLE=$<TARGET_FILE:bluffskill-server>"
             "-DBUNDLE_ICON=${CMAKE_SOURCE_DIR}/apps/server/resources/BluffSkillServer.icns"
             -P "${CMAKE_SOURCE_DIR}/cmake/create_macos_bundle.cmake"
         COMMAND ${CMAKE_COMMAND}
             "-DBUNDLE_PATH=$<TARGET_FILE_DIR:bluffskill-client>/BluffSkill.app"
             "-DBUNDLE_NAME=BluffSkill"
-            "-DBUNDLE_IDENTIFIER=com.bluffskill.client"
+            "-DBUNDLE_IDENTIFIER=com.azonelayer.bluffskill"
             "-DBUNDLE_EXECUTABLE=$<TARGET_FILE:bluffskill-client>"
             "-DBUNDLE_ICON=${CMAKE_SOURCE_DIR}/apps/client/resources/BluffSkillClient.icns"
             -P "${CMAKE_SOURCE_DIR}/cmake/create_macos_bundle.cmake"

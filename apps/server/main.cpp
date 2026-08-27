@@ -193,6 +193,8 @@ std::optional<bluffskill::poker::Action> parseAction(const QString& value) {
 
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
+    QCoreApplication::setOrganizationName("AzoneLayer");
+    QCoreApplication::setOrganizationDomain("azonelayer.com");
     ServerWindow window;
     QHttpServer server;
 

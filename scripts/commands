@@ -18,17 +18,17 @@ alias mac-start='mac-server && mac-client'
 function bluffskill-stop {
   osascript <<'APPLESCRIPT'
 try
-  if application id "com.bluffskill.server" is running then
+  if application id "com.azonelayer.bluffskill.server" is running then
     ignoring application responses
-      tell application id "com.bluffskill.server" to quit
+      tell application id "com.azonelayer.bluffskill.server" to quit
     end ignoring
   end if
 end try
 
 try
-  if application id "com.bluffskill.client" is running then
+  if application id "com.azonelayer.bluffskill" is running then
     ignoring application responses
-      tell application id "com.bluffskill.client" to quit
+      tell application id "com.azonelayer.bluffskill" to quit
     end ignoring
   end if
 end try
