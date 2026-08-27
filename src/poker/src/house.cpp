@@ -212,6 +212,13 @@ void House::submitAction(std::string_view competitionName, std::string_view tabl
     advanceReferencePlayers(competition, tableIndex);
 }
 
+void House::startNextHand(std::string_view competitionName, std::string_view tableName) {
+    auto& competition = findCompetition(competitionName);
+    const auto tableIndex = findTableIndex(competition, tableName);
+    competition.tables.at(tableIndex)->startNextHand();
+    advanceReferencePlayers(competition, tableIndex);
+}
+
 void House::advanceReferencePlayers(Competition& competition, std::size_t tableIndex) {
     auto& table = *competition.tables.at(tableIndex);
     // A valid no-limit hand has a finite stack of actions. The guard makes a broken

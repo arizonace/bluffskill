@@ -17,11 +17,13 @@
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPainter>
 #include <QPushButton>
+#include <QPixmap>
 #include <QStatusBar>
 #include <QSet>
 #include <QSignalBlocker>
@@ -29,12 +31,14 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVBoxLayout>
+#include <QTimer>
 #include <QLineEdit>
 #include <QLocale>
 
 #include <memory>
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <vector>
 
 namespace {
@@ -51,6 +55,11 @@ public:
         playerStacks_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
+        playerFolded_.fill(false);
+        playerSmallBlind_.fill(false);
+        playerBigBlind_.fill(false);
+        playerHoleCards_.fill({});
+        payoutStacks_.fill({});
         for (const auto& item : players) {
             const auto player = item.toObject();
             const auto seat = player.value("seat").toInt();
@@ -66,11 +75,18 @@ public:
         playerStacks_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
+        playerFolded_.fill(false);
+        playerSmallBlind_.fill(false);
+        playerBigBlind_.fill(false);
+        playerHoleCards_.fill({});
+        payoutStacks_.fill({});
         pot_ = 0;
         currentBet_ = 0;
         street_.clear();
         communityCards_.clear();
         localHoleCards_.clear();
+        resultText_.clear();
+        showdownOccurred_ = false;
         update();
     }
 
@@ -79,6 +95,11 @@ public:
         playerStacks_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
+        playerFolded_.fill(false);
+        playerSmallBlind_.fill(false);
+        playerBigBlind_.fill(false);
+        playerHoleCards_.fill({});
+        payoutStacks_.fill({});
         for (const auto& item : table.value("players").toArray()) {
             const auto player = item.toObject();
             const auto seat = player.value("seat").toInt();
@@ -88,12 +109,19 @@ public:
                 playerStacks_[index] = player.value("stack").toInteger();
                 playerActing_[index] = player.value("acting").toBool();
                 playerDealer_[index] = player.value("dealer").toBool();
+                playerFolded_[index] = player.value("folded").toBool();
+                for (const auto& card : player.value("holeCards").toArray()) playerHoleCards_[index].append(card.toString());
             }
         }
         pot_ = 0;
         for (const auto& item : table.value("pots").toArray()) pot_ += item.toObject().value("amount").toInteger();
         currentBet_ = table.value("currentBet").toInteger();
         street_ = table.value("street").toString();
+        showdownOccurred_ = table.value("showdownOccurred").toBool();
+        const auto smallBlindSeat = table.value("smallBlindSeat").toInt();
+        const auto bigBlindSeat = table.value("bigBlindSeat").toInt();
+        if (smallBlindSeat >= 1 && smallBlindSeat <= static_cast<int>(playerSmallBlind_.size())) playerSmallBlind_[smallBlindSeat - 1] = true;
+        if (bigBlindSeat >= 1 && bigBlindSeat <= static_cast<int>(playerBigBlind_.size())) playerBigBlind_[bigBlindSeat - 1] = true;
         communityCards_.clear();
         for (const auto& card : table.value("communityCards").toArray()) communityCards_.append(card.toString());
         localHoleCards_.clear();
@@ -101,10 +129,25 @@ public:
             for (const auto& item : table.value("players").toArray()) {
                 const auto player = item.toObject();
                 if (player.value("name").toString() != localPlayerName_) continue;
-                for (const auto& card : player.value("holeCards").toArray()) localHoleCards_.append(card.toString());
+                const auto localSeat = player.value("seat").toInt();
+                if (localSeat >= 1 && localSeat <= static_cast<int>(playerHoleCards_.size())) {
+                    localHoleCards_ = playerHoleCards_[static_cast<std::size_t>(localSeat - 1)];
+                }
                 break;
             }
         }
+        QStringList awards;
+        for (const auto& item : table.value("payouts").toArray()) {
+            for (const auto& awardItem : item.toObject().value("awards").toArray()) {
+                const auto award = awardItem.toObject();
+                const auto seat = award.value("seat").toInt();
+                const auto amount = award.value("amount").toInteger();
+                if (seat < 1 || seat > static_cast<int>(payoutStacks_.size())) continue;
+                payoutStacks_[static_cast<std::size_t>(seat - 1)].append(amount);
+                awards.append(playerNames_[static_cast<std::size_t>(seat - 1)] + " wins " + chips(amount));
+            }
+        }
+        resultText_ = awards.join("  •  ");
         update();
     }
 
@@ -113,6 +156,8 @@ public:
         localHoleCards_.clear();
         update();
     }
+
+    void setDealerAdvanceHandler(std::function<void()> handler) { dealerAdvanceHandler_ = std::move(handler); }
 
 protected:
     void paintEvent(QPaintEvent*) override {
@@ -140,12 +185,39 @@ protected:
             const auto label = playerNames_[i].isEmpty()
                 ? "Seat " + QString::number(i + 1)
                 : playerNames_[i] + "\n" + QString::number(playerStacks_[i]) + " chips"
-                    + (playerDealer_[i] ? "  Dealer" : "") + (playerActing_[i] ? "  Acting" : "");
+                    + (playerActing_[i] ? "  Acting" : "");
             painter.drawText(QRectF(point.x() - 58, point.y() - 20, 116, 40), Qt::AlignCenter, label);
         }
 
         drawBoard(painter, felt);
-        if (hasLocalSeat && !localHoleCards_.isEmpty()) drawHoleCards(painter, felt, localPoint);
+        dealerButtonRect_ = {};
+        for (std::size_t i = 0; i < seats.size(); ++i) {
+            if (playerNames_[i].isEmpty()) continue;
+            const auto point = QPointF(width() * seats[i].x(), height() * seats[i].y());
+            const auto vector = point - felt.center();
+            const auto length = std::hypot(vector.x(), vector.y());
+            const auto direction = length > 0.01 ? QPointF(vector.x() / length, vector.y() / length) : QPointF(0, 1);
+            const auto marker = point - direction * 58;
+            if (playerFolded_[i]) drawFoldedMarker(painter, marker + direction * 13);
+            if (playerDealer_[i]) {
+                const auto button = drawBadge(painter, marker - direction * 8, "D", Qt::white, QColor("#263126"));
+                if (street_ == "Showdown") dealerButtonRect_ = button;
+            }
+            if (playerSmallBlind_[i]) drawBadge(painter, marker, "Small Blind", QColor("#377DE6"), Qt::white);
+            if (playerBigBlind_[i]) drawBadge(painter, marker, "Big Blind", QColor("#D13A3A"), Qt::white);
+            drawPayoutStacks(painter, marker - direction * 25, payoutStacks_[i]);
+            if (showdownOccurred_ && !playerHoleCards_[i].isEmpty()) drawCardRow(painter, playerHoleCards_[i], marker - direction * 47, 27, 38);
+        }
+        if (hasLocalSeat && !localHoleCards_.isEmpty() && !showdownOccurred_) drawHoleCards(painter, felt, localPoint);
+    }
+
+    void mousePressEvent(QMouseEvent* event) override {
+        if (!dealerButtonRect_.isNull() && dealerButtonRect_.contains(event->position()) && dealerAdvanceHandler_) {
+            dealerAdvanceHandler_();
+            event->accept();
+            return;
+        }
+        QWidget::mousePressEvent(event);
     }
 
 private:
@@ -192,18 +264,59 @@ private:
         }
     }
 
+    static QRectF drawBadge(QPainter& painter, QPointF center, const QString& text, const QColor& fill, const QColor& textColor) {
+        painter.save();
+        painter.setFont(QFont("Helvetica", text == "D" ? 11 : 8, QFont::Bold));
+        const auto rect = text == "D" ? QRectF(center.x() - 11, center.y() - 11, 22, 22)
+            : QRectF(center.x() - 28, center.y() - 10, 56, 20);
+        painter.setPen(QPen(QColor("#F2E3B6"), 1));
+        painter.setBrush(fill);
+        painter.drawRoundedRect(rect, text == "D" ? 11 : 8, text == "D" ? 11 : 8);
+        painter.setPen(textColor);
+        painter.drawText(rect, Qt::AlignCenter, text);
+        painter.restore();
+        return rect;
+    }
+
+    void drawFoldedMarker(QPainter& painter, QPointF center) const {
+        const QRectF target(center.x() - 18, center.y() - 13, 36, 26);
+        if (!foldedHands_.isNull()) painter.drawPixmap(target.toRect(), foldedHands_);
+        else drawBadge(painter, center, "Folded", QColor("#EED9C4"), QColor("#523018"));
+    }
+
+    static void drawPayoutStacks(QPainter& painter, QPointF center, const QVector<qint64>& payouts) {
+        for (qsizetype index = 0; index < payouts.size(); ++index) {
+            const auto scale = std::max(0.56, 1.0 - static_cast<double>(index) * 0.17);
+            const auto radius = 11.0 * scale;
+            const auto point = center + QPointF(index * 12.0, index * 4.0);
+            painter.save();
+            painter.setPen(QPen(QColor("#FFF1B6"), 1));
+            painter.setBrush(QColor("#E2A944"));
+            for (int chip = 0; chip < 3; ++chip) painter.drawEllipse(point.x() - radius, point.y() - radius - chip * 3, radius * 2, radius * 2);
+            painter.setPen(Qt::white);
+            painter.setFont(QFont("Helvetica", 8, QFont::Bold));
+            painter.drawText(QRectF(point.x() - 31, point.y() + 6, 62, 16), Qt::AlignCenter, chips(payouts[index]));
+            painter.restore();
+        }
+    }
+
     void drawBoard(QPainter& painter, const QRectF& felt) const {
         painter.save();
         painter.setPen(Qt::white);
         painter.setFont(QFont("Helvetica", 18, QFont::DemiBold));
         const auto header = "POT  " + chips(pot_) + "\n" + (street_.isEmpty() ? "Waiting" : street_)
             + "\nCurrent bet: " + chips(currentBet_);
-        painter.drawText(QRectF(felt.center().x() - 200, felt.center().y() - 105, 400, 72), Qt::AlignCenter, header);
+        painter.drawText(QRectF(felt.center().x() - 200, felt.center().y() - 125, 400, 72), Qt::AlignCenter, header);
         if (communityCards_.isEmpty()) {
             painter.setFont(QFont("Helvetica", 13));
             painter.drawText(QRectF(felt.center().x() - 200, felt.center().y() - 18, 400, 30), Qt::AlignCenter, "Community cards will appear here");
         } else {
             drawCardRow(painter, communityCards_, {felt.center().x(), felt.center().y() + 22}, 54, 74);
+        }
+        if (!resultText_.isEmpty()) {
+            painter.setFont(QFont("Helvetica", 11, QFont::DemiBold));
+            painter.setPen(QColor("#FFF1B6"));
+            painter.drawText(QRectF(felt.center().x() - 260, felt.center().y() + 63, 520, 32), Qt::AlignCenter | Qt::TextWordWrap, resultText_);
         }
         painter.restore();
     }
@@ -214,9 +327,6 @@ private:
         const auto direction = length > 0.01 ? QPointF(vector.x() / length, vector.y() / length) : QPointF(0, 1);
         const auto cardCenter = localPoint - direction * 112;
         painter.save();
-        painter.setPen(QColor("#F6D365"));
-        painter.setFont(QFont("Helvetica", 12, QFont::DemiBold));
-        painter.drawText(QRectF(cardCenter.x() - 90, cardCenter.y() - 52, 180, 20), Qt::AlignCenter, "Your hole cards");
         drawCardRow(painter, localHoleCards_, cardCenter, 46, 64);
         painter.restore();
     }
@@ -225,12 +335,22 @@ private:
     std::array<qint64, 8> playerStacks_{};
     std::array<bool, 8> playerActing_{};
     std::array<bool, 8> playerDealer_{};
+    std::array<bool, 8> playerFolded_{};
+    std::array<bool, 8> playerSmallBlind_{};
+    std::array<bool, 8> playerBigBlind_{};
+    std::array<QStringList, 8> playerHoleCards_{};
+    std::array<QVector<qint64>, 8> payoutStacks_{};
     QString localPlayerName_;
     QStringList communityCards_;
     QStringList localHoleCards_;
     qint64 pot_{0};
     qint64 currentBet_{0};
     QString street_;
+    QString resultText_;
+    bool showdownOccurred_{};
+    QPixmap foldedHands_{":/bluffskill/resources/folded_hands.png"};
+    QRectF dealerButtonRect_;
+    std::function<void()> dealerAdvanceHandler_;
 };
 
 class ConnectionDialog final : public QDialog {
@@ -296,6 +416,7 @@ public:
         form->addRow("Server", server_); form->addRow("Competition", competition_); form->addRow("Table", table_);
         layout->addWidget(connection);
         pokerTable_ = new PokerTable(central);
+        pokerTable_->setDealerAdvanceHandler([this] { startNextHand(); });
         layout->addWidget(pokerTable_, 1);
         auto* actions = new QFrame(central);
         auto* actionLayout = new QVBoxLayout(actions);
@@ -335,6 +456,8 @@ public:
         connect(newGameAction_, &QAction::triggered, this, [this] { newGame(); });
         connect(competition_, &QComboBox::currentIndexChanged, this, [this] { refreshTables(); });
         connect(table_, &QComboBox::currentIndexChanged, this, [this] { refreshSeats(); });
+        nextHandTimer_.setSingleShot(true);
+        connect(&nextHandTimer_, &QTimer::timeout, this, [this] { startNextHand(); });
         statusBar()->showMessage("Choose Connection → Connect… to begin.");
     }
 
@@ -439,6 +562,7 @@ private:
         network_.clearAccessCache();
         network_.clearConnectionCache();
         connected_ = false;
+        nextHandTimer_.stop();
         serverUrl_ = QUrl{};
         resetDisconnectedUi();
         statusBar()->showMessage("Disconnected.");
@@ -584,9 +708,48 @@ private:
         }
         wagerStatus_->setText("Current bet: " + QLocale().toString(currentBet) + " chips"
             + (humanPlayer_ && callAmount > 0 ? " · You need " + QLocale().toString(callAmount) + " to call" : ""));
-        if (!humanPlayer_) actionStatus_->setText("Choose a local player through New Game to view private cards and act.");
-        else if (anyAction) actionStatus_->setText("Your turn. Select one of the server-approved actions.");
-        else actionStatus_->setText("Waiting for " + view.value("actingSeat").toVariant().toString() + " to act.");
+        const auto handFinished = view.value("street").toString() == "Showdown";
+        if (handFinished) {
+            const auto hadShowdown = view.value("showdownOccurred").toBool();
+            actionStatus_->setText(hadShowdown
+                ? "Showdown complete. The revealed cards and each pot winner are on the table. The next hand starts in 10 seconds, or click the Dealer button now."
+                : "The hand ended by a fold. The winner and payout are on the table. The next hand starts in 10 seconds, or click the Dealer button now.");
+            if (lastShowdownSequence_ != tableSequence_) {
+                lastShowdownSequence_ = tableSequence_;
+                nextHandTimer_.start(10'000);
+            }
+        } else {
+            nextHandTimer_.stop();
+            lastShowdownSequence_ = -1;
+            if (!humanPlayer_) actionStatus_->setText("Choose a local player through New Game to view private cards and act.");
+            else if (anyAction) actionStatus_->setText("Your turn. Select one of the server-approved actions.");
+            else actionStatus_->setText("Waiting for " + view.value("actingSeat").toVariant().toString() + " to act.");
+        }
+    }
+
+    void startNextHand() {
+        if (!connected_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        if (nextHandRequestInFlight_) return;
+        nextHandRequestInFlight_ = true;
+        nextHandTimer_.stop();
+        const auto attempt = connectionGeneration_;
+        const auto path = "/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText() + "/next-hand";
+        auto* reply = postJson(path, {});
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt] {
+            nextHandRequestInFlight_ = false;
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto response = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            if (!success) {
+                actionStatus_->setText(response.value("error").toString("The server could not begin the next hand."));
+                refreshTableView();
+                return;
+            }
+            applyTableView(response);
+            statusBar()->showMessage("The server started the next hand.");
+        });
     }
 
     void newGame() {
@@ -719,6 +882,9 @@ private:
         setActionControlsEnabled(false);
         amount_->setEnabled(false);
         tableSequence_ = 0;
+        lastShowdownSequence_ = -1;
+        nextHandRequestInFlight_ = false;
+        nextHandTimer_.stop();
         actionStatus_->setText("No human player is attached.");
         wagerStatus_->setText("Current bet: 0 chips");
     }
@@ -732,7 +898,10 @@ private:
     std::uint64_t tableRequestGeneration_{};
     std::uint64_t tableViewRequestGeneration_{};
     qint64 tableSequence_{};
+    qint64 lastShowdownSequence_{-1};
     bool connected_{};
+    bool nextHandRequestInFlight_{};
+    QTimer nextHandTimer_;
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};

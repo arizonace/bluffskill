@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <random>
-#include <set>
+#include <vector>
 
 namespace bluffskill::poker {
 
@@ -16,6 +16,66 @@ constexpr Chips bigBlind = 100;
 
 bool sameName(std::string_view left, std::string_view right) {
     return left == right;
+}
+
+struct HandRank {
+    int category{-1};
+    std::vector<int> tiebreakers;
+    auto operator<=>(const HandRank&) const = default;
+};
+
+int straightHigh(const std::array<int, 15>& counts) {
+    for (int high = 14; high >= 5; --high) {
+        bool complete = true;
+        for (int rank = high; rank > high - 5; --rank) complete = complete && counts[rank] > 0;
+        if (complete) return high;
+    }
+    return counts[14] && counts[2] && counts[3] && counts[4] && counts[5] ? 5 : 0;
+}
+
+HandRank rankFive(const std::array<cards::Card, 5>& cards) {
+    std::array<int, 15> counts{};
+    std::array<int, 5> ranks{};
+    for (std::size_t index = 0; index < cards.size(); ++index) {
+        ranks[index] = static_cast<int>(cards[index].rank);
+        ++counts[ranks[index]];
+    }
+    std::ranges::sort(ranks, std::greater<>{});
+    const auto flush = std::ranges::all_of(cards, [&cards](const cards::Card& card) { return card.suit == cards.front().suit; });
+    const auto straight = straightHigh(counts);
+    if (flush && straight) return {8, {straight}};
+
+    int four = 0;
+    std::vector<int> triples;
+    std::vector<int> pairs;
+    std::vector<int> singles;
+    for (int rank = 14; rank >= 2; --rank) {
+        if (counts[rank] == 4) four = rank;
+        else if (counts[rank] == 3) triples.push_back(rank);
+        else if (counts[rank] == 2) pairs.push_back(rank);
+        else if (counts[rank] == 1) singles.push_back(rank);
+    }
+    if (four) return {7, {four, singles.front()}};
+    if (!triples.empty() && (!pairs.empty() || triples.size() > 1)) {
+        return {6, {triples.front(), triples.size() > 1 ? triples[1] : pairs.front()}};
+    }
+    if (flush) return {5, {ranks.begin(), ranks.end()}};
+    if (straight) return {4, {straight}};
+    if (!triples.empty()) return {3, {triples.front(), singles[0], singles[1]}};
+    if (pairs.size() >= 2) return {2, {pairs[0], pairs[1], singles.front()}};
+    if (pairs.size() == 1) return {1, {pairs.front(), singles[0], singles[1], singles[2]}};
+    return {0, {ranks.begin(), ranks.end()}};
+}
+
+HandRank bestHand(const std::vector<cards::Card>& cards) {
+    HandRank best;
+    for (std::size_t a = 0; a < cards.size(); ++a) for (std::size_t b = a + 1; b < cards.size(); ++b)
+    for (std::size_t c = b + 1; c < cards.size(); ++c) for (std::size_t d = c + 1; d < cards.size(); ++d)
+    for (std::size_t e = d + 1; e < cards.size(); ++e) {
+        const auto candidate = rankFive({cards[a], cards[b], cards[c], cards[d], cards[e]});
+        if (candidate > best) best = candidate;
+    }
+    return best;
 }
 
 } // namespace
@@ -53,6 +113,8 @@ std::string_view toString(Action action) noexcept {
     case Action::bet: return "Bet";
     case Action::raise: return "Raise";
     case Action::fold: return "Fold";
+    case Action::smallBlind: return "Small Blind";
+    case Action::bigBlind: return "Big Blind";
     }
     return "Unknown";
 }
@@ -86,11 +148,24 @@ std::vector<const Table::Seat*> Table::liveSeats() const {
     return result;
 }
 
+std::vector<Table::Seat*> Table::eligibleSeats() {
+    std::vector<Seat*> result;
+    for (auto& seat : seats_) if (seat.stack > 0) result.push_back(&seat);
+    return result;
+}
+
 Table::Seat* Table::nextLiveSeatAfter(std::size_t seat) {
     const auto live = liveSeats();
     if (live.empty()) return nullptr;
     const auto next = std::ranges::find_if(live, [seat](const Seat* candidate) { return candidate->number > seat; });
     return next == live.end() ? live.front() : *next;
+}
+
+Table::Seat* Table::nextEligibleSeatAfter(std::size_t seat) {
+    const auto eligible = eligibleSeats();
+    if (eligible.empty()) return nullptr;
+    const auto next = std::ranges::find_if(eligible, [seat](const Seat* candidate) { return candidate->number > seat; });
+    return next == eligible.end() ? eligible.front() : *next;
 }
 
 Table::Seat* Table::nextPendingSeatAfter(std::size_t seat) const {
@@ -100,12 +175,13 @@ Table::Seat* Table::nextPendingSeatAfter(std::size_t seat) const {
     return wrap == seats_.end() ? nullptr : const_cast<Seat*>(&*wrap);
 }
 
-void Table::postBlind(Seat& seat, Chips amount) {
+void Table::postBlind(Seat& seat, Chips amount, Action action) {
     const auto paid = std::min(amount, seat.stack);
     seat.stack -= paid;
     seat.handCommitted += paid;
     seat.roundCommitted += paid;
     seat.allIn = seat.stack == 0;
+    history_.push_back({.player = seat.name, .seat = seat.number, .street = Street::preflop, .action = action, .amount = paid});
 }
 
 void Table::startHand() {
@@ -122,7 +198,8 @@ void Table::startHand() {
     }
     const auto live = liveSeats();
     if (live.size() < 2) throw std::logic_error("at least two players with chips are required");
-    dealerSeat_ = live.front()->number;
+    const auto dealerStillEligible = dealerSeat_ && std::ranges::any_of(live, [this](const Seat* seat) { return seat->number == *dealerSeat_; });
+    if (!dealerStillEligible) dealerSeat_ = live.front()->number;
     auto* small = nextLiveSeatAfter(*dealerSeat_);
     auto* big = nextLiveSeatAfter(small->number);
     if (live.size() == 2) {
@@ -134,6 +211,9 @@ void Table::startHand() {
     deck_->shuffle(random_);
     communityCards_.clear();
     history_.clear();
+    payouts_.clear();
+    showdownOccurred_ = false;
+    street_ = Street::preflop;
     for (auto& seat : seats_) {
         if (!seat.folded) seat.holeCards.reserve(2);
     }
@@ -145,15 +225,26 @@ void Table::startHand() {
             seat.holeCards.push_back(*card);
         }
     }
-    postBlind(*small, smallBlind);
-    postBlind(*big, bigBlind);
+    smallBlindSeat_ = small->number;
+    bigBlindSeat_ = big->number;
+    postBlind(*small, smallBlind, Action::smallBlind);
+    postBlind(*big, bigBlind, Action::bigBlind);
     currentBet_ = big->roundCommitted;
     lastFullRaise_ = bigBlind;
-    street_ = Street::preflop;
     for (auto& seat : seats_) seat.pending = !seat.folded && !seat.allIn;
     if (const auto* actor = nextPendingSeatAfter(big->number)) actingSeat_ = actor->number;
     else advanceStreet();
     ++eventSequence_;
+}
+
+void Table::startNextHand() {
+    if (street_ != Street::showdown) throw std::logic_error("the current hand has not finished");
+    if (!dealerSeat_) throw std::logic_error("the finished hand has no dealer");
+    const auto* nextDealer = nextEligibleSeatAfter(*dealerSeat_);
+    if (nextDealer == nullptr) throw std::logic_error("at least two players with chips are required");
+    dealerSeat_ = nextDealer->number;
+    street_ = Street::waiting;
+    startHand();
 }
 
 Table::Seat& Table::seatFor(std::string_view name) {
@@ -208,13 +299,15 @@ std::vector<PotView> Table::pots() const {
 }
 
 TableView Table::viewFor(std::string_view viewerName) const {
-    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .currentBet = currentBet_, .dealerSeat = dealerSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_, .pots = pots(), .actionHistory = history_};
+    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .currentBet = currentBet_, .dealerSeat = dealerSeat_,
+        .smallBlindSeat = smallBlindSeat_, .bigBlindSeat = bigBlindSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_,
+        .pots = pots(), .payouts = payouts_, .showdownOccurred = showdownOccurred_, .actionHistory = history_};
     const auto* viewer = seatFor(viewerName);
     for (const auto& seat : seats_) {
         TablePlayerView player{.name = seat.name, .kind = seat.kind, .seat = seat.number, .stack = seat.stack, .committed = seat.handCommitted,
                                .folded = seat.folded, .dealer = dealerSeat_ && *dealerSeat_ == seat.number,
                                .acting = actingSeat_ && *actingSeat_ == seat.number};
-        if (viewer == &seat) player.holeCards = seat.holeCards;
+        if (viewer == &seat || (showdownOccurred_ && !seat.folded)) player.holeCards = seat.holeCards;
         view.players.push_back(std::move(player));
     }
     if (viewer != nullptr) {
@@ -232,9 +325,48 @@ void Table::finishByFold() {
     Chips winnings = 0;
     for (const auto& pot : pots()) winnings += pot.amount;
     live.front()->stack += winnings;
+    payouts_.clear();
+    if (winnings > 0) payouts_.push_back({.amount = winnings, .awards = {{.seat = live.front()->number, .amount = winnings}}});
+    showdownOccurred_ = false;
     street_ = Street::showdown;
     actingSeat_.reset();
     for (auto& seat : seats_) seat.pending = false;
+}
+
+void Table::settleShowdown() {
+    if (communityCards_.size() != 5) throw std::logic_error("showdown requires five community cards");
+    payouts_.clear();
+    for (const auto& pot : pots()) {
+        std::vector<Seat*> eligible;
+        for (const auto seatNumber : pot.eligibleSeats) {
+            const auto found = std::ranges::find_if(seats_, [seatNumber](const Seat& seat) { return seat.number == seatNumber; });
+            if (found != seats_.end()) eligible.push_back(const_cast<Seat*>(&*found));
+        }
+        if (eligible.empty()) continue;
+        HandRank winningRank;
+        std::vector<Seat*> winners;
+        for (auto* seat : eligible) {
+            std::vector<cards::Card> cards = communityCards_;
+            cards.insert(cards.end(), seat->holeCards.begin(), seat->holeCards.end());
+            const auto rank = bestHand(cards);
+            if (rank > winningRank) { winningRank = rank; winners = {seat}; }
+            else if (rank == winningRank) winners.push_back(seat);
+        }
+        std::ranges::sort(winners, [this](const Seat* left, const Seat* right) {
+            const auto distance = [this](const Seat* seat) { return (seat->number + maximumSeats_ - *dealerSeat_) % maximumSeats_; };
+            return distance(left) < distance(right);
+        });
+        const auto share = pot.amount / static_cast<Chips>(winners.size());
+        auto remainder = pot.amount % static_cast<Chips>(winners.size());
+        PayoutView payout{.amount = pot.amount};
+        for (auto* winner : winners) {
+            const auto amount = share + (remainder-- > 0 ? 1 : 0);
+            winner->stack += amount;
+            payout.awards.push_back({.seat = winner->number, .amount = amount});
+        }
+        payouts_.push_back(std::move(payout));
+    }
+    showdownOccurred_ = true;
 }
 
 void Table::drawCommunityCards(std::size_t count) {
@@ -263,8 +395,9 @@ void Table::advanceStreet() {
     case Street::flop: street_ = Street::turn; drawCommunityCards(1); setRoundPendingAfterDealer(); break;
     case Street::turn: street_ = Street::river; drawCommunityCards(1); setRoundPendingAfterDealer(); break;
     case Street::river:
-        street_ = Street::showdown; // Hand ranking and payout are deliberately a later engine slice.
+        street_ = Street::showdown;
         actingSeat_.reset();
+        settleShowdown();
         break;
     default: break;
     }
@@ -307,6 +440,9 @@ void Table::submitAction(std::string_view playerName, Action action, Chips amoun
     bool fullRaise = false;
 
     switch (action) {
+    case Action::smallBlind:
+    case Action::bigBlind:
+        throw CommandError(CommandFailure::illegalAction, "blind posts are assigned by the table, not submitted by a player");
     case Action::check:
         if (!legal.check) throw CommandError(CommandFailure::illegalAction, "check is only legal when no chips are owed");
         break;

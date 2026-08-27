@@ -5,13 +5,16 @@
 #include <QHttpServer>
 #include <QHttpServerRequest>
 #include <QHttpServerResponse>
+#include <QHeaderView>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMainWindow>
+#include <QLocale>
 #include <QPlainTextEdit>
 #include <QSplitter>
 #include <QTcpServer>
+#include <QTableWidget>
 #include <QTreeWidget>
 #include <QUrlQuery>
 #include <QVBoxLayout>
@@ -22,12 +25,21 @@ class ServerWindow final : public QMainWindow {
 public:
     ServerWindow() {
         setWindowTitle("BluffSkill Server");
-        resize(900, 600);
+        resize(1180, 600);
         auto* splitter = new QSplitter(this);
         tree_ = new QTreeWidget(splitter);
         tree_->setHeaderLabels({"House / competition / table / player"});
         log_ = new QPlainTextEdit(splitter);
         log_->setReadOnly(true);
+        actionLog_ = new QTableWidget(splitter);
+        actionLog_->setColumnCount(4);
+        actionLog_->setHorizontalHeaderLabels({"Player", "Round", "Action", "Value"});
+        actionLog_->horizontalHeader()->setStretchLastSection(true);
+        actionLog_->verticalHeader()->setVisible(false);
+        actionLog_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        actionLog_->setSelectionMode(QAbstractItemView::NoSelection);
+        actionLog_->setAlternatingRowColors(true);
+        splitter->setSizes({300, 380, 500});
         setCentralWidget(splitter);
         refreshTree();
     }
@@ -49,14 +61,33 @@ public:
             }
         }
         tree_->expandAll();
+        refreshActionLog();
     }
 
     bluffskill::poker::House& house() noexcept { return house_; }
 
 private:
+    void refreshActionLog() {
+        actionLog_->setRowCount(0);
+        for (const auto& competition : house_.competitions()) {
+            for (const auto& table : competition.tables) {
+                const auto view = house_.tableView(competition.name, table.name);
+                for (const auto& action : view.actionHistory) {
+                    const auto row = actionLog_->rowCount();
+                    actionLog_->insertRow(row);
+                    actionLog_->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(action.player)));
+                    actionLog_->setItem(row, 1, new QTableWidgetItem(QString::fromUtf8(bluffskill::poker::toString(action.street))));
+                    actionLog_->setItem(row, 2, new QTableWidgetItem(QString::fromUtf8(bluffskill::poker::toString(action.action))));
+                    actionLog_->setItem(row, 3, new QTableWidgetItem(action.amount == 0 ? QString{} : QLocale().toString(action.amount)));
+                }
+            }
+        }
+    }
+
     bluffskill::poker::House house_;
     QTreeWidget* tree_{};
     QPlainTextEdit* log_{};
+    QTableWidget* actionLog_{};
 };
 
 QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competition) {
@@ -108,6 +139,14 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
         for (const auto seat : pot.eligibleSeats) eligibleSeats.append(static_cast<int>(seat));
         pots.append(QJsonObject{{"amount", static_cast<qint64>(pot.amount)}, {"eligibleSeats", eligibleSeats}});
     }
+    QJsonArray payouts;
+    for (const auto& payout : table.payouts) {
+        QJsonArray awards;
+        for (const auto& award : payout.awards) {
+            awards.append(QJsonObject{{"seat", static_cast<int>(award.seat)}, {"amount", static_cast<qint64>(award.amount)}});
+        }
+        payouts.append(QJsonObject{{"amount", static_cast<qint64>(payout.amount)}, {"awards", awards}});
+    }
     QJsonArray history;
     for (const auto& action : table.actionHistory) {
         history.append(QJsonObject{{"player", QString::fromStdString(action.player)}, {"seat", static_cast<int>(action.seat)},
@@ -125,8 +164,11 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
         {"street", QString::fromUtf8(bluffskill::poker::toString(table.street))},
         {"currentBet", static_cast<qint64>(table.currentBet)},
         {"dealerSeat", table.dealerSeat ? static_cast<int>(*table.dealerSeat) : 0},
+        {"smallBlindSeat", table.smallBlindSeat ? static_cast<int>(*table.smallBlindSeat) : 0},
+        {"bigBlindSeat", table.bigBlindSeat ? static_cast<int>(*table.bigBlindSeat) : 0},
         {"actingSeat", table.actingSeat ? static_cast<int>(*table.actingSeat) : 0}, {"communityCards", communityCards},
-        {"players", players}, {"pots", pots}, {"actionHistory", history}, {"legalActions", legalActions}};
+        {"players", players}, {"pots", pots}, {"payouts", payouts}, {"showdownOccurred", table.showdownOccurred},
+        {"actionHistory", history}, {"legalActions", legalActions}};
 }
 
 QHttpServerResponse tableViewResponse(const bluffskill::poker::TableView& table, QHttpServerResponder::StatusCode status = QHttpServerResponder::StatusCode::Ok) {
@@ -239,6 +281,20 @@ int main(int argc, char* argv[]) {
             } catch (const std::exception& exception) {
                 window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → 400");
                 return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
+            }
+        });
+
+    server.route("/v1/competitions/<arg>/tables/<arg>/next-hand", QHttpServerRequest::Method::Post,
+        [&window](const QString& competitionName, const QString& tableName) -> QHttpServerResponse {
+            try {
+                window.house().startNextHand(competitionName.toStdString(), tableName.toStdString());
+                const auto table = window.house().tableView(competitionName.toStdString(), tableName.toStdString());
+                window.refreshTree();
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/next-hand → 200");
+                return tableViewResponse(table);
+            } catch (const std::exception& exception) {
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/next-hand → 409");
+                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
             }
         });
 

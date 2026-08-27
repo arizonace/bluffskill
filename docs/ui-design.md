@@ -14,7 +14,7 @@ Connection menu → Connect dialog → server field enabled
                player joins → action panel enabled on that player’s turn
 ```
 
-The eight seats use a fixed semantic layout: three top, three bottom, left, and right. A seat presents name, stack, status, dealer button if applicable, an action arrow when active, and a clear local-player ring. The center presents the pot, side pots, current betting-round wager, community cards, and street. Community and local hole cards render as compact rank-and-suit card faces; opponents' hole cards are never rendered. Do not encode state in color alone; provide text labels and accessible names.
+The eight seats use a fixed semantic layout: three top, three bottom, left, and right. A seat presents name, stack, a dealer button if applicable, blind markers, a folded-hands marker after folding, an action arrow when active, and a clear local-player ring. The center presents the pot, side pots, current betting-round wager, community cards, and street. Community and local hole cards render as compact rank-and-suit card faces; after a completed showdown, the required non-folded players' cards and each main/side-pot award appear. The clickable dealer button starts the next hand immediately; otherwise the client requests it after ten seconds. Do not encode state in color alone; provide text labels and accessible names.
 
 Action history is an expandable accessible panel per seat (and a compact hover summary for pointer users). It contains street, action, and amount. The action composer gives only legal action buttons, a formatted amount field, denomination increment/decrement controls, and concise explanations of the current wager, call amount, and min/max constraints.
 
@@ -22,7 +22,7 @@ Connection UI accepts host and port, then progressively enables competition and 
 
 ## Server console
 
-The server window has a live event log and an expandable tree: House → competition → table → player. It displays its listening address, records incoming calls and response status without secrets, and eventually exposes controlled actions: create competition, add reference players, pause/resume, snapshot, and export OPML.
+The server window has a live event log, an expandable tree (House → competition → table → player), and an action table with anchored headers for player, round, action, and value. It displays its listening address, records incoming calls and response status without secrets, and eventually exposes controlled actions: create competition, add reference players, pause/resume, snapshot, and export OPML.
 
 ## Product principles
 

@@ -48,6 +48,7 @@ public:
     [[nodiscard]] TableView tableView(std::string_view competitionName, std::string_view tableName, std::string_view viewerName = {}) const;
     void submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
         Action action, Chips amount, std::uint64_t expectedSequence);
+    void startNextHand(std::string_view competitionName, std::string_view tableName);
 
 private:
     struct Competition {

@@ -13,6 +13,7 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 | `GET` | `/v1/competitions/{competition}/tables` | list tables in a competition |
 | `GET` | `/v1/competitions/{competition}/tables/{table}/view` | fetch viewer-projected table state |
 | `POST` | `/v1/competitions/{competition}/tables/{table}/actions` | submit an action |
+| `POST` | `/v1/competitions/{competition}/tables/{table}/next-hand` | begin the next hand after the displayed result |
 | `GET` | `/v1/competitions/{competition}/events` | stream view-projected notifications |
 
 Each table in the table-list response includes `maximumSeats` and a `players` array. Every player entry has a one-based `seat`, name, and player kind; a player may be added to a competition only when it is assigned to a free table seat.
@@ -48,6 +49,8 @@ The action request also carries the API-player name in this unauthenticated scaf
 The action endpoint returns `400` for invalid syntax, `401/403` for authentication/authorization failure, `409` for a stale sequence or turn conflict, and `422` for a syntactically valid but illegal poker action.
 
 The viewer-projected table response includes `currentBet`, the largest commitment in the active betting round. When the viewer is acting, `legalActions.callAmount` states the exact additional chips required to call; a client must display these values rather than infer them from another player's stack.
+
+The table projection also includes the dealer, small-blind, and big-blind seats; the per-hand action history (including forced blind posts); and settled `payouts`. Each payout carries its complete amount and explicit seat/amount awards, so clients never recreate side-pot allocation. Opponents' hole cards remain absent except for a completed, non-fold showdown; a hand won by folding does not reveal them.
 
 ## Development-only localhost authentication
 

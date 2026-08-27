@@ -17,7 +17,7 @@ namespace bluffskill::poker {
 using Chips = std::int64_t;
 
 enum class Street { waiting, preflop, flop, turn, river, showdown };
-enum class Action { check, call, bet, raise, fold };
+enum class Action { smallBlind, bigBlind, check, call, bet, raise, fold };
 enum class CommandFailure { staleSequence, turnConflict, illegalAction };
 
 class CommandError final : public std::runtime_error {
@@ -43,6 +43,18 @@ struct LegalActions {
 struct PotView {
     Chips amount{0};
     std::vector<std::size_t> eligibleSeats;
+};
+
+struct PayoutAwardView {
+    std::size_t seat{0};
+    Chips amount{0};
+};
+
+// A settled main pot or side pot.  Awards are explicit so a split pot remains
+// visible without asking a client to recreate the chip-splitting rule.
+struct PayoutView {
+    Chips amount{0};
+    std::vector<PayoutAwardView> awards;
 };
 
 struct TablePlayerView {
@@ -71,10 +83,14 @@ struct TableView {
     Street street{Street::waiting};
     Chips currentBet{0}; // Largest commitment in the active betting round.
     std::optional<std::size_t> dealerSeat;
+    std::optional<std::size_t> smallBlindSeat;
+    std::optional<std::size_t> bigBlindSeat;
     std::optional<std::size_t> actingSeat;
     std::vector<cards::Card> communityCards;
     std::vector<TablePlayerView> players;
     std::vector<PotView> pots;
+    std::vector<PayoutView> payouts;
+    bool showdownOccurred{false};
     std::vector<ActionView> actionHistory;
     std::optional<LegalActions> legalActions; // Available only to the viewer who is acting.
 };
@@ -90,6 +106,7 @@ public:
 
     void seatPlayer(std::string name, PlayerKind kind, std::size_t seat, Chips stack);
     void startHand();
+    void startNextHand();
     [[nodiscard]] TableView viewFor(std::string_view viewerName = {}) const;
     [[nodiscard]] std::uint64_t eventSequence() const noexcept { return eventSequence_; }
     void submitAction(std::string_view playerName, Action action, Chips amount, std::uint64_t expectedSequence);
@@ -101,17 +118,20 @@ private:
     [[nodiscard]] const Seat* seatFor(std::string_view name) const;
     [[nodiscard]] std::vector<Seat*> liveSeats();
     [[nodiscard]] std::vector<const Seat*> liveSeats() const;
+    [[nodiscard]] std::vector<Seat*> eligibleSeats();
     [[nodiscard]] Seat* nextLiveSeatAfter(std::size_t seat);
+    [[nodiscard]] Seat* nextEligibleSeatAfter(std::size_t seat);
     [[nodiscard]] Seat* nextPendingSeatAfter(std::size_t seat) const;
     [[nodiscard]] LegalActions legalActionsFor(const Seat& seat) const;
     [[nodiscard]] std::vector<PotView> pots() const;
-    void postBlind(Seat& seat, Chips amount);
+    void postBlind(Seat& seat, Chips amount, Action action);
     void drawCommunityCards(std::size_t count);
     void setRoundPendingAfterDealer();
     void advanceAfterAction(Seat& actor, bool fullRaise);
     void advanceStreet();
     void updateActor();
     void finishByFold();
+    void settleShowdown();
     [[nodiscard]] bool hasSingleLiveSeat() const;
 
     std::string name_;
@@ -120,11 +140,15 @@ private:
     std::vector<Seat> seats_;
     Street street_{Street::waiting};
     std::optional<std::size_t> dealerSeat_;
+    std::optional<std::size_t> smallBlindSeat_;
+    std::optional<std::size_t> bigBlindSeat_;
     std::optional<std::size_t> actingSeat_;
     Chips currentBet_{0};
     Chips lastFullRaise_{0};
     std::vector<cards::Card> communityCards_;
     std::vector<ActionView> history_;
+    std::vector<PayoutView> payouts_;
+    bool showdownOccurred_{false};
     std::uint64_t eventSequence_{0};
     std::optional<cards::Deck> deck_;
     std::mt19937_64 random_{std::random_device{}()};

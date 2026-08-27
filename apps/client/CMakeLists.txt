@@ -1,6 +1,7 @@
 qt_add_executable(bluffskill-client
     human_player.cpp
     main.cpp
+    resources.qrc
 )
 
 target_link_libraries(bluffskill-client PRIVATE

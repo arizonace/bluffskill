@@ -16,6 +16,13 @@ int main() {
     assert(publicView.street == Street::preflop);
     assert(publicView.currentBet == 100);
     assert(publicView.actingSeat == 1);
+    assert(publicView.smallBlindSeat == 2);
+    assert(publicView.bigBlindSeat == 3);
+    assert(publicView.actionHistory.size() == 2);
+    assert(publicView.actionHistory[0].action == Action::smallBlind);
+    assert(publicView.actionHistory[0].amount == 50);
+    assert(publicView.actionHistory[1].action == Action::bigBlind);
+    assert(publicView.actionHistory[1].amount == 100);
     assert(publicView.players.front().holeCards.empty());
     assert(aliceView.players.front().holeCards.size() == 2);
     assert(aliceView.legalActions && aliceView.legalActions->call);
@@ -58,4 +65,32 @@ int main() {
     assert(finished.pots[0].eligibleSeats.size() == 3);
     assert(finished.pots[1].amount == 200);
     assert((finished.pots[1].eligibleSeats == std::vector<std::size_t>{2, 3}));
+    assert(finished.showdownOccurred);
+    assert(finished.players[1].holeCards.size() == 2);
+    assert(finished.players[2].holeCards.size() == 2);
+    assert(finished.payouts.size() == 2);
+    assert(finished.payouts[0].amount == 300);
+    assert(finished.payouts[1].amount == 200);
+
+    Table rotation("Rotation", 3, 500);
+    rotation.seatPlayer("One", PlayerKind::api, 1, 500);
+    rotation.seatPlayer("Two", PlayerKind::api, 2, 500);
+    rotation.seatPlayer("Three", PlayerKind::api, 3, 500);
+    rotation.startHand();
+    auto rotationView = rotation.viewFor("One");
+    rotation.submitAction("One", Action::fold, 0, rotationView.eventSequence);
+    rotationView = rotation.viewFor("Two");
+    rotation.submitAction("Two", Action::fold, 0, rotationView.eventSequence);
+    const auto foldedHand = rotation.viewFor();
+    assert(foldedHand.street == Street::showdown);
+    assert(!foldedHand.showdownOccurred);
+    assert(foldedHand.payouts.size() == 1);
+    assert(foldedHand.payouts[0].awards.size() == 1);
+    assert(foldedHand.payouts[0].awards[0].seat == 3);
+    assert(foldedHand.players[2].holeCards.empty());
+    rotation.startNextHand();
+    const auto nextHand = rotation.viewFor();
+    assert(nextHand.street == Street::preflop);
+    assert(nextHand.dealerSeat == 2);
+    assert(nextHand.smallBlindSeat == 3);
 }
