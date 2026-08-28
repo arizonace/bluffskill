@@ -452,7 +452,13 @@ std::vector<PotView> Table::pots() const {
     Chips previous = 0;
     for (const auto level : levels) {
         const auto contributors = std::count_if(seats_.begin(), seats_.end(), [level](const Seat& seat) { return seat.handCommitted >= level; });
-        const auto amount = (level - previous) * contributors;
+        // A folded player may have committed less than the first all-in cap.
+        // They are not eligible to win, but every chip they put in must remain
+        // in the corresponding pot layer.  Counting only seats at `level`
+        // would otherwise drop that smaller contribution entirely.
+        const auto amount = std::accumulate(seats_.begin(), seats_.end(), Chips{0}, [previous, level](Chips total, const Seat& seat) {
+            return total + std::min(seat.handCommitted, level) - std::min(seat.handCommitted, previous);
+        });
         // A level above an all-in cap is a side pot only if continued action
         // actually supplied more than one contribution at that level.
         if (amount > 0 && (level <= levels.front() || contributors >= 2)) {

@@ -10,6 +10,10 @@ add_executable(table_state_test table_state_test.cpp)
 target_link_libraries(table_state_test PRIVATE bluffskill_poker)
 add_test(NAME table_state_test COMMAND table_state_test)
 
+add_executable(chip_invariant_test chip_invariant_test.cpp)
+target_link_libraries(chip_invariant_test PRIVATE bluffskill_poker)
+add_test(NAME chip_invariant_test COMMAND chip_invariant_test)
+
 add_executable(reference_player_test reference_player_test.cpp)
 target_link_libraries(reference_player_test PRIVATE bluffskill_poker)
 add_test(NAME reference_player_test COMMAND reference_player_test)
