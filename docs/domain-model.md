@@ -19,7 +19,9 @@ The initial prototype uses one `TournamentCompetition`, one `Table`, at most eig
 | `PlayerController` | adapter interface for human/API/bot decisions; not the player identity |
 | `Dealer` | automated system actor that advances forced operations |
 
-Use integer chip units (`std::int64_t`) rather than floating point. Every competition has a sorted, positive list of chip denominations. Its smallest denomination is the wagering unit: starting stacks, forced blinds, bets, raises, and awarded pots must be exact multiples of it. This preserves chip-representable stacks even when an odd chip is assigned while splitting a pot. The initial default is `25, 100, 500, 1000`; server configuration may replace it before a competition is created. Betting legality and pots otherwise operate on integer value, which keeps future currencies and tournament rebuy rules manageable.
+Use integer chip units (`std::int64_t`) rather than floating point. Every competition has a sorted, positive list of chip denominations; each denomination must be an integer multiple of the preceding denomination. Its smallest denomination is the wagering unit: starting stacks, forced blinds, bets, raises, and awarded pots must be exact multiples of it. This preserves chip-representable stacks even when an odd chip is assigned while splitting a pot. The initial default is `25, 100, 500, 1000`; server configuration may replace it before a competition is created. Betting legality and pots otherwise operate on integer value, which keeps future currencies and tournament rebuy rules manageable.
+
+The no-limit raise floor is the previous full bet or raise: the big blind begins each preflop round as the opening bet, an opening bet must be at least the big blind, and every full raise must add at least the size of the preceding full bet or raise. A player whose maximum commitment is below that floor may raise only by committing their entire remaining stack; that short all-in does not establish a new full-raise amount.
 
 ## Hand ranking
 

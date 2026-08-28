@@ -5,6 +5,12 @@
 int main() {
     using namespace bluffskill::poker;
 
+    try {
+        [[maybe_unused]] const auto invalidDenominations = normalizedChipDenominations({25, 100, 250});
+        assert(false && "each denomination must divide the following denomination");
+    } catch (const std::invalid_argument&) {
+    }
+
     Table table("Red", 3, 200);
     table.seatPlayer("Alice", PlayerKind::api, 1, 100);
     table.seatPlayer("BotOne", PlayerKind::reference, 2, 200);
@@ -149,4 +155,45 @@ int main() {
     assert(blindLevels.viewFor().blindLevel == 1);
     assert(blindLevels.viewFor().smallBlind == 100);
     assert(blindLevels.viewFor().bigBlind == 200);
+
+    // The big blind starts the raise amount. Each successive minimum raise is
+    // the current bet plus the size of the preceding full raise.
+    Table minimumRaises("Minimum raises", 3, 2'000);
+    minimumRaises.seatPlayer("Opener", PlayerKind::api, 1, 2'000);
+    minimumRaises.seatPlayer("Raiser", PlayerKind::api, 2, 2'000);
+    minimumRaises.seatPlayer("Big", PlayerKind::api, 3, 2'000);
+    minimumRaises.startHand();
+    auto raiseView = minimumRaises.viewFor("Opener");
+    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 200);
+    minimumRaises.submitAction("Opener", Action::raise, 300, raiseView.eventSequence);
+    raiseView = minimumRaises.viewFor("Raiser");
+    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 500);
+    try {
+        minimumRaises.submitAction("Raiser", Action::raise, 400, raiseView.eventSequence);
+        assert(false && "a raise smaller than the previous full raise must be rejected");
+    } catch (const CommandError& error) {
+        assert(error.failure() == CommandFailure::illegalAction);
+    }
+    minimumRaises.submitAction("Raiser", Action::raise, 500, raiseView.eventSequence);
+    raiseView = minimumRaises.viewFor("Big");
+    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 700);
+    try {
+        minimumRaises.submitAction("Big", Action::raise, 600, raiseView.eventSequence);
+        assert(false && "a re-raise must match the preceding raise amount");
+    } catch (const CommandError& error) {
+        assert(error.failure() == CommandFailure::illegalAction);
+    }
+
+    // A player may make a smaller raise only when that exact amount is all-in.
+    Table shortAllIn("Short all-in", 3, 2'000);
+    shortAllIn.seatPlayer("Opener", PlayerKind::api, 1, 2'000);
+    shortAllIn.seatPlayer("AllIn", PlayerKind::api, 2, 400);
+    shortAllIn.seatPlayer("Big", PlayerKind::api, 3, 2'000);
+    shortAllIn.startHand();
+    auto allInView = shortAllIn.viewFor("Opener");
+    shortAllIn.submitAction("Opener", Action::raise, 300, allInView.eventSequence);
+    allInView = shortAllIn.viewFor("AllIn");
+    assert(allInView.legalActions && allInView.legalActions->minimumAmount == 400);
+    assert(allInView.legalActions->maximumAmount == 400);
+    shortAllIn.submitAction("AllIn", Action::raise, 400, allInView.eventSequence);
 }

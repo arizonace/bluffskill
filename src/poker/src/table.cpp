@@ -147,6 +147,11 @@ ChipDenominations normalizedChipDenominations(ChipDenominations denominations) {
     }
     std::ranges::sort(denominations);
     denominations.erase(std::unique(denominations.begin(), denominations.end()), denominations.end());
+    for (std::size_t index = 1; index < denominations.size(); ++index) {
+        if (denominations[index] % denominations[index - 1] != 0) {
+            throw std::invalid_argument("each chip denomination must be an integer multiple of the preceding denomination");
+        }
+    }
     return denominations;
 }
 

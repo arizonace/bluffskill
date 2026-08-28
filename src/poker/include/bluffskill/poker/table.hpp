@@ -18,7 +18,8 @@ namespace bluffskill::poker {
 using Chips = std::int64_t;
 using ChipDenominations = std::vector<Chips>;
 
-// Values are sorted, unique, and positive.  The smallest denomination is the
+// Values are sorted, unique, positive, and each denomination is an integer
+// multiple of the preceding denomination. The smallest denomination is the
 // wagering unit: every posted blind, bet, raise, stack, and award is a multiple
 // of it, so a table never creates a value that cannot be represented in chips.
 [[nodiscard]] ChipDenominations normalizedChipDenominations(ChipDenominations denominations);
