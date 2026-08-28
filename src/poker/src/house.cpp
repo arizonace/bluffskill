@@ -31,8 +31,8 @@ std::string normalizeName(std::string_view value) {
 } // namespace
 
 CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
-    if (spec.maximumPlayers == 0 || spec.maximumPlayers > 8) {
-        throw std::invalid_argument("maximumPlayers must be between 1 and 8");
+    if (spec.maximumPlayers == 0 || spec.maximumPlayers > 10) {
+        throw std::invalid_argument("maximumPlayers must be between 1 and 10");
     }
     if (spec.startingStack == 0) throw std::invalid_argument("startingStack must be positive");
 
@@ -128,7 +128,7 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
     std::size_t capacity = 0;
     for (const auto& table : competition.summary.tables) capacity += table.maximumSeats;
     const auto availableSeats = capacity - occupiedSeats;
-    if (count == 0 || count > 7 || count > availableSeats) {
+    if (count == 0 || count > availableSeats) {
         throw std::invalid_argument("reference-player count does not fit the available seats");
     }
 
@@ -152,6 +152,7 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
         });
         competition.tables.at(tableIndex - 1)->seatPlayer(playerName, PlayerKind::reference, *seat,
             static_cast<Chips>(competition.summary.tournament.startingStack));
+        startTableIfReady(competition, tableIndex - 1);
     }
     return summaryOf(competition);
 }
@@ -170,11 +171,19 @@ CompetitionSummary House::createApiPlayer(std::string_view competitionName, std:
     const auto& player = competition.players.back();
     auto& table = *competition.tables.at(tableIndex);
     table.seatPlayer(player.player->name(), player.player->kind(), *seat, static_cast<Chips>(competition.summary.tournament.startingStack));
-    if (table.viewFor().street == Street::waiting) {
-        table.startHand();
-        advanceReferencePlayers(competition, tableIndex);
-    }
+    startTableIfReady(competition, tableIndex);
     return summaryOf(competition);
+}
+
+void House::startTableIfReady(Competition& competition, std::size_t tableIndex) {
+    auto& table = *competition.tables.at(tableIndex);
+    if (table.viewFor().street != Street::waiting) return;
+    const auto seated = std::count_if(competition.players.begin(), competition.players.end(), [tableIndex](const auto& player) {
+        return player.tableIndex == tableIndex;
+    });
+    if (seated != competition.summary.tables.at(tableIndex).maximumSeats) return;
+    table.startHand();
+    advanceReferencePlayers(competition, tableIndex);
 }
 
 CompetitionSummary House::summaryOf(const Competition& competition) const {

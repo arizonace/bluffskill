@@ -4,7 +4,7 @@
 
 `House` owns a collection of `Competition` aggregates. A competition owns its tables; a table owns a hand and is the serialization boundary for poker actions. A player identity can belong to a competition, while a player’s **seat** and stack are table-local.
 
-The initial prototype uses one `TournamentCompetition`, one `Table`, at most eight seats, automated dealer operations, and one human API player. Avoid making the prototype’s one-table assumption a general `Competition` invariant.
+The initial prototype uses one `TournamentCompetition`, one `Table`, at most ten seats, automated dealer operations, and one human API player. Avoid making the prototype’s one-table assumption a general `Competition` invariant.
 
 ## Core types
 

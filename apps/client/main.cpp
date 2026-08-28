@@ -27,6 +27,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QPixmap>
+#include <QRandomGenerator>
 #include <QStatusBar>
 #include <QSet>
 #include <QSignalBlocker>
@@ -48,6 +49,8 @@
 #include <vector>
 
 namespace {
+
+constexpr int defaultTableSeats = 10;
 
 class PokerTable final : public QWidget {
 public:
@@ -200,19 +203,20 @@ protected:
         painter.setPen(QPen(QColor("#C8A55B"), 5));
         painter.setBrush(QColor("#256044"));
         painter.drawRoundedRect(felt, 170, 170);
-        const std::array<QPointF, 8> seats{{
+        const std::array<QPointF, defaultTableSeats> seats{{
             {width() * .25, felt.top()}, {width() * .50, felt.top()}, {width() * .75, felt.top()},
-            {felt.right(), height() * .50}, {width() * .75, felt.bottom()}, {width() * .50, felt.bottom()},
-            {width() * .25, felt.bottom()}, {felt.left(), height() * .50},
+            {felt.right(), felt.top() + felt.height() * .32}, {felt.right(), felt.top() + felt.height() * .68},
+            {width() * .75, felt.bottom()}, {width() * .50, felt.bottom()}, {width() * .25, felt.bottom()},
+            {felt.left(), felt.top() + felt.height() * .68}, {felt.left(), felt.top() + felt.height() * .32},
         }};
-        constexpr std::array<QPointF, 8> inwardDirections{{
-            {0, 1}, {0, 1}, {0, 1}, {-1, 0}, {0, -1}, {0, -1}, {0, -1}, {1, 0},
+        constexpr std::array<QPointF, defaultTableSeats> inwardDirections{{
+            {0, 1}, {0, 1}, {0, 1}, {-1, 0}, {-1, 0}, {0, -1}, {0, -1}, {0, -1}, {1, 0}, {1, 0},
         }};
-        constexpr std::array<QPointF, 8> tangents{{
-            {1, 0}, {1, 0}, {1, 0}, {0, 1}, {1, 0}, {1, 0}, {1, 0}, {0, 1},
+        constexpr std::array<QPointF, defaultTableSeats> tangents{{
+            {1, 0}, {1, 0}, {1, 0}, {0, 1}, {0, 1}, {1, 0}, {1, 0}, {1, 0}, {0, 1}, {0, 1},
         }};
-        constexpr std::array<QPointF, 8> actionDirections{{
-            {-1, 0}, {-1, 0}, {-1, 0}, {0, -1}, {1, 0}, {1, 0}, {1, 0}, {0, 1},
+        constexpr std::array<QPointF, defaultTableSeats> actionDirections{{
+            {-1, 0}, {-1, 0}, {-1, 0}, {0, -1}, {0, -1}, {1, 0}, {1, 0}, {1, 0}, {0, 1}, {0, 1},
         }};
         QPointF localPoint;
         bool hasLocalSeat = false;
@@ -294,13 +298,12 @@ protected:
     }
 
 private:
-    // The layout is deliberately cardinal rather than radial.  960 x 720 is the
-    // smallest canvas that leaves an 18 px horizontal gap between adjacent
-    // north/south action and winnings boxes, a 27 px gap around the board, and
-    // a 24 px vertical gap between the player card/description zones and board.
-    // The dimensions include the two-card hand used by a player and its ranking.
+    // The layout is deliberately cardinal rather than radial.  960 x 880 is the
+    // smallest canvas that keeps the two east and west seats 284 px apart and
+    // leaves their action, winnings, card, and description zones unobstructed.
+    // It also retains clearance around the board and north/south player zones.
     static constexpr int minimumTableWidth = 960;
-    static constexpr int minimumTableHeight = 720;
+    static constexpr int minimumTableHeight = 880;
     static constexpr qreal playerRadius = 43.0;
     static constexpr qreal buttonRadius = 17.0;
     static constexpr qreal buttonAreaDistance = playerRadius + buttonRadius + 2.0;
@@ -373,7 +376,7 @@ private:
     }
 
     [[nodiscard]] static bool isSouthSeat(std::size_t seatIndex) {
-        return seatIndex >= 4 && seatIndex <= 6;
+        return seatIndex >= 5 && seatIndex <= 7;
     }
 
     [[nodiscard]] static QPointF cardsCenter(const QPointF& playerCenter, const QPointF& inward,
@@ -479,19 +482,19 @@ private:
         painter.restore();
     }
 
-    std::array<QString, 8> playerNames_{};
-    std::array<qint64, 8> playerStacks_{};
-    std::array<qint64, 8> playerCommitted_{};
-    std::array<bool, 8> playerActing_{};
-    std::array<bool, 8> playerDealer_{};
-    std::array<bool, 8> playerFolded_{};
-    std::array<bool, 8> playerSmallBlind_{};
-    std::array<bool, 8> playerBigBlind_{};
-    std::array<QStringList, 8> playerHoleCards_{};
-    std::array<QString, 8> playerShowdownDescriptions_{};
-    std::array<ActionBox, 8> playerLastActions_{};
-    std::array<qint64, 8> playerPotWinnings_{};
-    std::array<qint64, 8> playerNetWinnings_{};
+    std::array<QString, defaultTableSeats> playerNames_{};
+    std::array<qint64, defaultTableSeats> playerStacks_{};
+    std::array<qint64, defaultTableSeats> playerCommitted_{};
+    std::array<bool, defaultTableSeats> playerActing_{};
+    std::array<bool, defaultTableSeats> playerDealer_{};
+    std::array<bool, defaultTableSeats> playerFolded_{};
+    std::array<bool, defaultTableSeats> playerSmallBlind_{};
+    std::array<bool, defaultTableSeats> playerBigBlind_{};
+    std::array<QStringList, defaultTableSeats> playerHoleCards_{};
+    std::array<QString, defaultTableSeats> playerShowdownDescriptions_{};
+    std::array<ActionBox, defaultTableSeats> playerLastActions_{};
+    std::array<qint64, defaultTableSeats> playerPotWinnings_{};
+    std::array<qint64, defaultTableSeats> playerNetWinnings_{};
     QString localPlayerName_;
     QStringList communityCards_;
     QStringList localHoleCards_;
@@ -631,7 +634,7 @@ class ClientWindow final : public QMainWindow {
 public:
     ClientWindow() : settings_(bluffskill::app_config::AppConfig::load()) {
         setWindowTitle("BluffSkill");
-        resize(1100, 1040);
+        resize(1200, 1200);
         auto* central = new QWidget(this);
         auto* layout = new QVBoxLayout(central);
         auto* connection = new QFrame(central);
@@ -1438,13 +1441,14 @@ private:
         const auto attempt = connectionGeneration_;
         pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName);
         newGameAction_->setEnabled(false);
-        statusBar()->showMessage("Creating a six-player reference tournament…");
+        const auto humanSeat = QRandomGenerator::global()->bounded(1, defaultTableSeats + 1);
+        statusBar()->showMessage("Creating a nine-reference-player tournament…");
         auto* reply = postJson("/v1/competitions", QJsonObject{
             {"flavor", "NoLimitTexasHoldEm"},
-            {"maximumPlayers", 8},
+            {"maximumPlayers", defaultTableSeats},
             {"startingStack", 7000},
         });
-        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt] {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, humanSeat] {
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const auto competition = QJsonDocument::fromJson(reply->readAll()).object();
             const auto success = reply->error() == QNetworkReply::NoError && status == 201;
@@ -1456,52 +1460,63 @@ private:
                 newGameAction_->setEnabled(true);
                 return;
             }
-            addReferencePlayers(competition.value("name").toString(), attempt);
+            const auto competitionName = competition.value("name").toString();
+            addReferencePlayers(competitionName, attempt, humanSeat - 1, [this, competitionName, attempt, humanSeat] {
+                attachHumanPlayer(competitionName, "Red", attempt, humanSeat);
+            });
         });
     }
 
-    void addReferencePlayers(const QString& competitionName, std::uint64_t attempt) {
+    void addReferencePlayers(const QString& competitionName, std::uint64_t attempt, int count, std::function<void()> onSuccess) {
+        if (count == 0) {
+            onSuccess();
+            return;
+        }
         const auto path = "/v1/competitions/" + competitionName + "/reference-players";
-        auto* reply = postJson(path, QJsonObject{{"count", 6}});
-        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt] {
+        auto* reply = postJson(path, QJsonObject{{"count", count}});
+        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt, onSuccess = std::move(onSuccess)] {
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const auto success = reply->error() == QNetworkReply::NoError && status == 201;
             release(reply);
             if (attempt != connectionGeneration_ || !connected_) return;
             if (!success) {
-                QMessageBox::warning(this, "Reference players failed", "The competition was created, but its six reference players were not added.");
+                QMessageBox::warning(this, "Reference players failed", "The competition was created, but its reference players were not added.");
                 pendingHumanPlayer_.reset();
                 newGameAction_->setEnabled(true);
                 refreshCompetitions(competitionName);
                 return;
             }
-            attachHumanPlayer(competitionName, "Red", attempt);
+            onSuccess();
         });
     }
 
-    void attachHumanPlayer(const QString& competitionName, const QString& tableName, std::uint64_t attempt) {
+    void attachHumanPlayer(const QString& competitionName, const QString& tableName, std::uint64_t attempt, int humanSeat) {
         if (!pendingHumanPlayer_) return;
         auto* reply = track(pendingHumanPlayer_->attachToTable(network_, serverUrl_, competitionName, tableName));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt] {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt, humanSeat] {
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const auto response = QJsonDocument::fromJson(reply->readAll()).object();
             const auto success = reply->error() == QNetworkReply::NoError && status == 201;
             release(reply);
             if (attempt != connectionGeneration_ || !connected_) return;
-            newGameAction_->setEnabled(true);
             if (!success) {
                 const auto detail = response.value("error").toString("The server could not attach your player.");
                 QMessageBox::warning(this, "Player attachment failed", detail);
                 pendingHumanPlayer_.reset();
+                newGameAction_->setEnabled(true);
                 refreshCompetitions(competitionName);
                 return;
             }
             humanPlayer_ = std::move(pendingHumanPlayer_);
             pokerTable_->setLocalPlayerName(humanPlayer_->apiPlayerName());
             setActionControlsEnabled(false);
-            actionStatus_->setText("You are " + humanPlayer_->apiPlayerName() + ". Retrieving your private table view…");
-            statusBar()->showMessage("Created " + competitionName + " with six reference players and " + humanPlayer_->apiPlayerName() + ".");
-            refreshCompetitions(competitionName);
+            actionStatus_->setText("You are " + humanPlayer_->apiPlayerName() + ". Seating remaining reference players…");
+            addReferencePlayers(competitionName, attempt, defaultTableSeats - humanSeat, [this, competitionName] {
+                newGameAction_->setEnabled(true);
+                actionStatus_->setText("You are " + humanPlayer_->apiPlayerName() + ". Retrieving your private table view…");
+                statusBar()->showMessage("Created " + competitionName + " with nine reference players and " + humanPlayer_->apiPlayerName() + ".");
+                refreshCompetitions(competitionName);
+            });
         });
     }
 

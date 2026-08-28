@@ -7,7 +7,7 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `POST` | `/v1/competitions` | create a single-table Texas Hold'em tournament |
-| `POST` | `/v1/competitions/{competition}/reference-players` | add 1–7 in-process bot players |
+| `POST` | `/v1/competitions/{competition}/reference-players` | add in-process bot players to available seats |
 | `POST` | `/v1/competitions/{competition}/tables/{table}/players` | attach a human API player |
 | `GET` | `/v1/competitions` | list visible competitions |
 | `GET` | `/v1/competitions/{competition}/tables` | list tables in a competition |
@@ -24,19 +24,19 @@ Each table in the table-list response includes `maximumSeats` and a `players` ar
 Creation request example:
 
 ```json
-{ "flavor": "NoLimitTexasHoldEm", "maximumPlayers": 8, "startingStack": 7000 }
+{ "flavor": "NoLimitTexasHoldEm", "maximumPlayers": 10, "startingStack": 7000 }
 ```
 
-For a locally running server at port `53153`, these commands list competitions, create one, then add six reference players. `POST /v1/competitions` creates; it never lists.
+For a locally running server at port `53153`, these commands list competitions, create one, then add nine reference players. `POST /v1/competitions` creates; it never lists. A table begins its first hand when all of its seats are occupied, allowing a client to place its API player between two reference-player creation groups.
 
 ```sh
 curl http://127.0.0.1:53153/v1/competitions
 curl --request POST http://127.0.0.1:53153/v1/competitions \
   --header 'Content-Type: application/json' \
-  --data '{"flavor":"NoLimitTexasHoldEm","maximumPlayers":8,"startingStack":7000}'
+  --data '{"flavor":"NoLimitTexasHoldEm","maximumPlayers":10,"startingStack":7000}'
 curl --request POST http://127.0.0.1:53153/v1/competitions/Valhalla/reference-players \
   --header 'Content-Type: application/json' \
-  --data '{"count":6}'
+  --data '{"count":9}'
 ```
 
 Action request example:

@@ -339,7 +339,7 @@ int main(int argc, char* argv[]) {
             const auto json = QJsonDocument::fromJson(request.body()).object();
             try {
                 const auto competition = window.house().createSingleTableTournament({
-                    .maximumPlayers = static_cast<std::size_t>(json.value("maximumPlayers").toInt(8)),
+                    .maximumPlayers = static_cast<std::size_t>(json.value("maximumPlayers").toInt(10)),
                     .startingStack = static_cast<unsigned int>(json.value("startingStack").toInt(7000)),
                 });
                 window.refreshTree();

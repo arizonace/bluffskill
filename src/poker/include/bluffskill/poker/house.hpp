@@ -16,7 +16,7 @@ namespace bluffskill::poker {
 enum class CompetitionStyle { tournament, cash };
 
 struct TournamentSpec {
-    std::size_t maximumPlayers{8};
+    std::size_t maximumPlayers{10};
     unsigned int startingStack{7000};
 };
 
@@ -75,6 +75,7 @@ private:
     [[nodiscard]] Table& findTable(Competition& competition, std::string_view tableName);
     [[nodiscard]] const Table& findTable(const Competition& competition, std::string_view tableName) const;
     [[nodiscard]] std::optional<std::size_t> firstFreeSeat(const Competition& competition, std::size_t tableIndex) const;
+    void startTableIfReady(Competition& competition, std::size_t tableIndex);
     void validatePlayerName(const Competition& competition, std::string_view name) const;
     void advanceReferencePlayers(Competition& competition, std::size_t tableIndex);
 

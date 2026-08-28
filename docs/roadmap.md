@@ -13,7 +13,7 @@
 
 ## Milestone 2 — single-table tournament
 
-- Up to eight seats, blind schedule, elimination, dealer movement, showdown/payout.
+- Up to ten seats, blind schedule, elimination, dealer movement, showdown/payout.
 - In-process reference bots behind `PlayerController` with seeded profiles.
 - Snapshot only at hand boundaries; server console state tree and OPML export.
 
