@@ -72,6 +72,7 @@ public:
         playerHoleCards_.fill({});
         playerShowdownDescriptions_.fill({});
         clearActionBoxes();
+        presentedActingSeat_ = 0;
         playerPotWinnings_.fill(0);
         playerNetWinnings_.fill(0);
         for (const auto& item : players) {
@@ -105,6 +106,7 @@ public:
         communityCards_.clear();
         localHoleCards_.clear();
         showdownOccurred_ = false;
+        presentedActingSeat_ = 0;
         update();
     }
 
@@ -120,6 +122,7 @@ public:
         playerBigBlind_.fill(false);
         playerHoleCards_.fill({});
         playerShowdownDescriptions_.fill({});
+        presentedActingSeat_ = 0;
         playerPotWinnings_.fill(0);
         playerNetWinnings_.fill(0);
         for (const auto& item : table.value("players").toArray()) {
@@ -194,6 +197,11 @@ public:
         update();
     }
 
+    void setPresentedActingSeat(std::size_t seat) {
+        presentedActingSeat_ = seat > playerNames_.size() ? 0 : seat;
+        update();
+    }
+
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
@@ -235,6 +243,14 @@ protected:
             }
             painter.setPen(QPen(localPlayer ? QColor("#F6D365") : Qt::white, localPlayer ? 3 : 1));
             painter.drawEllipse(point, playerRadius, playerRadius);
+            const auto acting = presentedActingSeat_ == 0 ? playerActing_[i] : presentedActingSeat_ == i + 1;
+            if (acting) {
+                // Keep the action-history box factual: the double ring alone
+                // identifies the player currently expected to act.
+                painter.setPen(QPen(QColor("#F6D365"), 3));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawEllipse(point, playerRadius - 6, playerRadius - 6);
+            }
             const auto label = playerNames_[i].isEmpty()
                 ? "Seat " + QString::number(i + 1)
                 : playerNames_[i];
@@ -271,9 +287,7 @@ protected:
             const auto actionDirection = actionDirections[i];
             const auto actionDistance = 45.0 + std::abs(actionDirection.x()) * 31.0 + std::abs(actionDirection.y()) * 19.0;
             const auto winningsDistance = 45.0 + std::abs(actionDirection.x()) * 35.0 + std::abs(actionDirection.y()) * 20.0;
-            auto action = playerLastActions_[i];
-            if (playerActing_[i]) action = {.name = "Action", .visible = true};
-            drawActionBox(painter, point + actionDirection * actionDistance, action);
+            drawActionBox(painter, point + actionDirection * actionDistance, playerLastActions_[i]);
             drawWinningsBox(painter, point - actionDirection * winningsDistance, playerPotWinnings_[i], playerNetWinnings_[i]);
             if (showdownOccurred_ && !playerFolded_[i] && !playerHoleCards_[i].isEmpty()) {
                 drawPlayerCards(painter, playerHoleCards_[i], playerShowdownDescriptions_[i], point, inward,
@@ -495,6 +509,7 @@ private:
     std::array<ActionBox, defaultTableSeats> playerLastActions_{};
     std::array<qint64, defaultTableSeats> playerPotWinnings_{};
     std::array<qint64, defaultTableSeats> playerNetWinnings_{};
+    std::size_t presentedActingSeat_{0};
     QString localPlayerName_;
     QStringList communityCards_;
     QStringList localHoleCards_;
@@ -1170,10 +1185,12 @@ private:
     void presentNextAutomatedAction() {
         if (automatedActionQueue_.isEmpty()) {
             automatedActionTimer_.stop();
+            pokerTable_->setPresentedActingSeat(0);
             refreshTableView();
             return;
         }
         const auto action = automatedActionQueue_.takeFirst();
+        pokerTable_->setPresentedActingSeat(action.seat);
         pokerTable_->showLastAction(action.seat, action.action, action.amount);
         actionStatus_->setText(action.player + " " + action.action.toLower() + (action.amount > 0 ? " " + QLocale().toString(action.amount) : "") + ".");
         automatedActionTimer_.start(settings_.automatedPlayerDelayMilliseconds);
