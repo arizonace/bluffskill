@@ -52,7 +52,7 @@ namespace {
 class PokerTable final : public QWidget {
 public:
     explicit PokerTable(QWidget* parent = nullptr) : QWidget(parent) {
-        setMinimumSize(900, 680);
+        setMinimumSize(minimumTableWidth, minimumTableHeight);
         setAccessibleName("Poker table");
     }
 
@@ -205,14 +205,18 @@ protected:
             {felt.right(), height() * .50}, {width() * .75, felt.bottom()}, {width() * .50, felt.bottom()},
             {width() * .25, felt.bottom()}, {felt.left(), height() * .50},
         }};
-        constexpr std::array<QPointF, 8> outwardDirections{{
-            {0, -1}, {0, -1}, {0, -1}, {1, 0}, {0, 1}, {0, 1}, {0, 1}, {-1, 0},
+        constexpr std::array<QPointF, 8> inwardDirections{{
+            {0, 1}, {0, 1}, {0, 1}, {-1, 0}, {0, -1}, {0, -1}, {0, -1}, {1, 0},
+        }};
+        constexpr std::array<QPointF, 8> tangents{{
+            {1, 0}, {1, 0}, {1, 0}, {0, 1}, {1, 0}, {1, 0}, {1, 0}, {0, 1},
         }};
         constexpr std::array<QPointF, 8> actionDirections{{
             {-1, 0}, {-1, 0}, {-1, 0}, {0, -1}, {1, 0}, {1, 0}, {1, 0}, {0, 1},
         }};
         QPointF localPoint;
         bool hasLocalSeat = false;
+        std::size_t localSeatIndex = 0;
         painter.setFont(QFont("Helvetica", 12));
         for (std::size_t i = 0; i < seats.size(); ++i) {
             const auto point = seats[i];
@@ -223,17 +227,18 @@ protected:
             if (localPlayer) {
                 localPoint = point;
                 hasLocalSeat = true;
+                localSeatIndex = i;
             }
             painter.setPen(QPen(localPlayer ? QColor("#F6D365") : Qt::white, localPlayer ? 3 : 1));
-            painter.drawEllipse(point, 43, 43);
+            painter.drawEllipse(point, playerRadius, playerRadius);
             const auto label = playerNames_[i].isEmpty()
                 ? "Seat " + QString::number(i + 1)
                 : playerNames_[i];
             painter.setFont(QFont("Helvetica", 12));
-            painter.drawText(QRectF(point.x() - 58, point.y() - 23, 116, 22), Qt::AlignCenter, label);
+            painter.drawText(QRectF(point.x() - 58, point.y() - 35, 116, 22), Qt::AlignCenter, label);
             if (!playerNames_[i].isEmpty()) {
                 painter.setFont(QFont("Helvetica", 13, QFont::DemiBold));
-                painter.drawText(QRectF(point.x() - 58, point.y() - 1, 116, 22), Qt::AlignCenter, QString::number(playerStacks_[i]));
+                painter.drawText(QRectF(point.x() - 58, point.y() - 11, 116, 22), Qt::AlignCenter, QString::number(playerStacks_[i]));
             }
         }
 
@@ -242,22 +247,22 @@ protected:
         for (std::size_t i = 0; i < seats.size(); ++i) {
             if (playerNames_[i].isEmpty()) continue;
             const auto point = seats[i];
-            const auto direction = outwardDirections[i];
-            const auto front = point - direction * 59;
-            const auto side = QPointF(-direction.y(), direction.x());
+            const auto inward = inwardDirections[i];
+            const auto buttonArea = point + inward * buttonAreaDistance;
+            const auto tangent = tangents[i];
             const auto blind = playerSmallBlind_[i] ? RoleButton::smallBlind
                 : playerBigBlind_[i] ? RoleButton::bigBlind : RoleButton::none;
             const auto busted = playerStacks_[i] == 0 && (street_ == "Showdown" || playerCommitted_[i] == 0);
-            if (playerFolded_[i] && !busted) drawFoldedMarker(painter, point - direction * 28);
+            if (playerFolded_[i] && !busted) drawFoldedMarker(painter, point + QPointF(0, 25));
             if (playerDealer_[i] && blind != RoleButton::none) {
-                const auto dealerButton = drawRoleButton(painter, front - side * 17, RoleButton::dealer);
-                drawRoleButton(painter, front + side * 17, blind);
+                const auto dealerButton = drawRoleButton(painter, buttonArea - tangent * 17, RoleButton::dealer);
+                drawRoleButton(painter, buttonArea + tangent * 17, blind);
                 if (street_ == "Showdown") dealerButtonRect_ = dealerButton;
             } else if (playerDealer_[i]) {
-                const auto dealerButton = drawRoleButton(painter, front, RoleButton::dealer);
+                const auto dealerButton = drawRoleButton(painter, buttonArea, RoleButton::dealer);
                 if (street_ == "Showdown") dealerButtonRect_ = dealerButton;
             } else if (blind != RoleButton::none) {
-                drawRoleButton(painter, front, blind);
+                drawRoleButton(painter, buttonArea, blind);
             }
             const auto actionDirection = actionDirections[i];
             const auto actionDistance = 45.0 + std::abs(actionDirection.x()) * 31.0 + std::abs(actionDirection.y()) * 19.0;
@@ -267,15 +272,14 @@ protected:
             drawActionBox(painter, point + actionDirection * actionDistance, action);
             drawWinningsBox(painter, point - actionDirection * winningsDistance, playerPotWinnings_[i], playerNetWinnings_[i]);
             if (showdownOccurred_ && !playerFolded_[i] && !playerHoleCards_[i].isEmpty()) {
-                const auto cardsCenter = front - direction * 82;
-                drawCardRow(painter, playerHoleCards_[i], cardsCenter, 38, 52);
-                drawShowdownDescription(painter, playerShowdownDescriptions_[i], cardsCenter - direction * 59);
+                drawPlayerCards(painter, playerHoleCards_[i], playerShowdownDescriptions_[i], point, inward,
+                    isSouthSeat(i), 38, 52);
             }
         }
         if (hasLocalSeat && !localHoleCards_.isEmpty()) {
             const auto localIndex = std::ranges::find(playerNames_, localPlayerName_);
             const auto localFolded = localIndex != playerNames_.end() && playerFolded_[static_cast<std::size_t>(std::distance(playerNames_.begin(), localIndex))];
-            if (!showdownOccurred_ || localFolded) drawHoleCards(painter, felt, localPoint,
+            if (!showdownOccurred_ || localFolded) drawHoleCards(painter, localPoint, inwardDirections[localSeatIndex], isSouthSeat(localSeatIndex),
                 localIndex == playerNames_.end() ? QString{} : playerShowdownDescriptions_[static_cast<std::size_t>(std::distance(playerNames_.begin(), localIndex))]);
         }
     }
@@ -290,6 +294,20 @@ protected:
     }
 
 private:
+    // The layout is deliberately cardinal rather than radial.  960 x 720 is the
+    // smallest canvas that leaves an 18 px horizontal gap between adjacent
+    // north/south action and winnings boxes, a 27 px gap around the board, and
+    // a 24 px vertical gap between the player card/description zones and board.
+    // The dimensions include the two-card hand used by a player and its ranking.
+    static constexpr int minimumTableWidth = 960;
+    static constexpr int minimumTableHeight = 720;
+    static constexpr qreal playerRadius = 43.0;
+    static constexpr qreal buttonRadius = 17.0;
+    static constexpr qreal buttonAreaDistance = playerRadius + buttonRadius + 2.0;
+    static constexpr qreal cardsAfterButtonsGap = 18.0;
+    static constexpr qreal cardsDescriptionGap = 12.0;
+    static constexpr qreal showdownDescriptionHeight = 28.0;
+
     struct ActionBox {
         QString name;
         qint64 amount{0};
@@ -348,8 +366,35 @@ private:
         painter.save();
         painter.setPen(Qt::white);
         painter.setFont(QFont("Helvetica", 12, QFont::DemiBold));
-        painter.drawText(QRectF(center.x() - 100, center.y() - 13, 200, 28), Qt::AlignCenter | Qt::TextWordWrap, description);
+        painter.drawText(QRectF(center.x() - 100, center.y() - showdownDescriptionHeight / 2.0, 200,
+                             showdownDescriptionHeight),
+            Qt::AlignCenter | Qt::TextWordWrap, description);
         painter.restore();
+    }
+
+    [[nodiscard]] static bool isSouthSeat(std::size_t seatIndex) {
+        return seatIndex >= 4 && seatIndex <= 6;
+    }
+
+    [[nodiscard]] static QPointF cardsCenter(const QPointF& playerCenter, const QPointF& inward,
+        const QStringList& cards, qreal cardWidth, qreal cardHeight) {
+        constexpr qreal cardGap = 8.0;
+        const auto rowWidth = cards.size() * cardWidth + std::max<qsizetype>(0, cards.size() - 1) * cardGap;
+        const auto inwardHalfExtent = std::abs(inward.x()) > 0.5 ? rowWidth / 2.0 : cardHeight / 2.0;
+        const auto buttonCenter = playerCenter + inward * buttonAreaDistance;
+        return buttonCenter + inward * (buttonRadius + cardsAfterButtonsGap + inwardHalfExtent);
+    }
+
+    static void drawPlayerCards(QPainter& painter, const QStringList& cards, const QString& description,
+        const QPointF& playerCenter, const QPointF& inward, bool southSeat, qreal cardWidth, qreal cardHeight) {
+        if (cards.isEmpty()) return;
+        const auto center = cardsCenter(playerCenter, inward, cards, cardWidth, cardHeight);
+        drawCardRow(painter, cards, center, cardWidth, cardHeight);
+        if (!description.isEmpty()) {
+            const auto descriptionOffset = cardHeight / 2.0 + cardsDescriptionGap + showdownDescriptionHeight / 2.0;
+            const auto descriptionCenter = center + QPointF(0, southSeat ? -descriptionOffset : descriptionOffset);
+            drawShowdownDescription(painter, description, descriptionCenter);
+        }
     }
 
     static QRectF drawRoleButton(QPainter& painter, QPointF center, RoleButton role) {
@@ -371,7 +416,7 @@ private:
     }
 
     void drawFoldedMarker(QPainter& painter, QPointF center) const {
-        const QRectF target(center.x() - 23, center.y() - 16, 46, 32);
+        const QRectF target(center.x() - 21, center.y() - 14, 42, 28);
         if (!foldedHands_.isNull()) painter.drawPixmap(target.toRect(), foldedHands_);
         else {
             painter.save();
@@ -416,7 +461,7 @@ private:
         painter.setPen(Qt::white);
         painter.setFont(QFont("Helvetica", 18, QFont::DemiBold));
         const auto header = "POT  " + chips(pot_) + "\nCurrent bet: " + chips(currentBet_);
-        painter.drawText(QRectF(felt.center().x() - 200, felt.center().y() - 125, 400, 52), Qt::AlignCenter, header);
+        painter.drawText(QRectF(felt.center().x() - 200, felt.center().y() - 90, 400, 52), Qt::AlignCenter, header);
         if (communityCards_.isEmpty()) {
             painter.setFont(QFont("Helvetica", 13));
             painter.drawText(QRectF(felt.center().x() - 200, felt.center().y() - 18, 400, 30), Qt::AlignCenter, "Community cards will appear here");
@@ -426,14 +471,11 @@ private:
         painter.restore();
     }
 
-    void drawHoleCards(QPainter& painter, const QRectF& felt, const QPointF& localPoint, const QString& description) const {
-        const auto vector = localPoint - felt.center();
-        const auto length = std::hypot(vector.x(), vector.y());
-        const auto direction = length > 0.01 ? QPointF(vector.x() / length, vector.y() / length) : QPointF(0, 1);
-        const auto cardCenter = localPoint - direction * 112;
+    void drawHoleCards(QPainter& painter, const QPointF& localPoint, const QPointF& inward, bool southSeat,
+        const QString& description) const {
         painter.save();
-        drawCardRow(painter, localHoleCards_, cardCenter, 46, 64);
-        if (street_ == "Showdown") drawShowdownDescription(painter, description, cardCenter - direction * 68);
+        drawPlayerCards(painter, localHoleCards_, street_ == "Showdown" ? description : QString{}, localPoint, inward,
+            southSeat, 46, 64);
         painter.restore();
     }
 
@@ -589,7 +631,7 @@ class ClientWindow final : public QMainWindow {
 public:
     ClientWindow() : settings_(bluffskill::app_config::AppConfig::load()) {
         setWindowTitle("BluffSkill");
-        resize(1100, 920);
+        resize(1100, 1040);
         auto* central = new QWidget(this);
         auto* layout = new QVBoxLayout(central);
         auto* connection = new QFrame(central);
