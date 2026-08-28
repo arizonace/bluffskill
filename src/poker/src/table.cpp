@@ -136,6 +136,20 @@ std::string describeAvailableHand(const std::vector<cards::Card>& cards) {
 
 } // namespace
 
+ChipDenominations defaultChipDenominations() {
+    return {25, 100, 500, 1000};
+}
+
+ChipDenominations normalizedChipDenominations(ChipDenominations denominations) {
+    if (denominations.empty()) throw std::invalid_argument("at least one chip denomination is required");
+    if (std::ranges::any_of(denominations, [](Chips denomination) { return denomination <= 0; })) {
+        throw std::invalid_argument("chip denominations must be positive");
+    }
+    std::ranges::sort(denominations);
+    denominations.erase(std::unique(denominations.begin(), denominations.end()), denominations.end());
+    return denominations;
+}
+
 struct Table::Seat {
     std::string name;
     PlayerKind kind{PlayerKind::api};
@@ -175,9 +189,14 @@ std::string_view toString(Action action) noexcept {
     return "Unknown";
 }
 
-Table::Table(std::string name, std::size_t maximumSeats, Chips startingStack, BlindSchedule blindSchedule)
-    : name_(std::move(name)), maximumSeats_(maximumSeats), startingStack_(startingStack), blindSchedule_(blindSchedule) {
+Table::Table(std::string name, std::size_t maximumSeats, Chips startingStack, BlindSchedule blindSchedule,
+    ChipDenominations chipDenominations)
+    : name_(std::move(name)), maximumSeats_(maximumSeats), startingStack_(startingStack),
+      chipDenominations_(normalizedChipDenominations(std::move(chipDenominations))), blindSchedule_(blindSchedule) {
     if (maximumSeats_ == 0 || startingStack_ <= 0) throw std::invalid_argument("table requires seats and a positive starting stack");
+    if (!isChipValue(startingStack_) || !isChipValue(baseSmallBlind) || !isChipValue(baseBigBlind)) {
+        throw std::invalid_argument("starting stack and blind amounts must be multiples of the smallest chip denomination");
+    }
     setBlindSchedule(blindSchedule_);
 }
 
@@ -185,7 +204,7 @@ Table::~Table() = default;
 
 void Table::seatPlayer(std::string name, PlayerKind kind, std::size_t seat, Chips stack) {
     if (street_ != Street::waiting) throw std::logic_error("players cannot be seated during a hand");
-    if (seat == 0 || seat > maximumSeats_ || stack <= 0) throw std::invalid_argument("invalid table seat or stack");
+    if (seat == 0 || seat > maximumSeats_ || stack <= 0 || !isChipValue(stack)) throw std::invalid_argument("invalid table seat or stack");
     if (std::ranges::any_of(seats_, [seat, &name](const Seat& candidate) { return candidate.number == seat || sameName(candidate.name, name); })) {
         throw std::invalid_argument("seat or player is already occupied");
     }
@@ -256,6 +275,10 @@ Chips Table::smallBlindAmount() const {
 Chips Table::bigBlindAmount() const {
     const auto multiplier = static_cast<Chips>(1) << std::min<std::size_t>(blindLevel_, 20);
     return baseBigBlind * multiplier;
+}
+
+bool Table::isChipValue(Chips amount) const noexcept {
+    return amount >= 0 && amount % chipDenominations_.front() == 0;
 }
 
 void Table::advanceBlindLevelIfDue() {
@@ -439,7 +462,8 @@ std::vector<PotView> Table::pots() const {
 
 TableView Table::viewFor(std::string_view viewerName) const {
     TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .currentBet = currentBet_,
-        .smallBlind = smallBlindAmount(), .bigBlind = bigBlindAmount(), .blindLevel = blindLevel_, .dealerSeat = dealerSeat_,
+        .smallBlind = smallBlindAmount(), .bigBlind = bigBlindAmount(), .chipDenominations = chipDenominations_,
+        .blindLevel = blindLevel_, .dealerSeat = dealerSeat_,
         .smallBlindSeat = smallBlindSeat_, .bigBlindSeat = bigBlindSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_,
         .pots = pots(), .payouts = payouts_, .showdownOccurred = showdownOccurred_, .actionHistory = history_};
     const auto* viewer = seatFor(viewerName);
@@ -522,11 +546,13 @@ void Table::settleShowdown() {
             const auto distance = [this](const Seat* seat) { return (seat->number + maximumSeats_ - *dealerSeat_) % maximumSeats_; };
             return distance(left) < distance(right);
         });
-        const auto share = pot.amount / static_cast<Chips>(winners.size());
-        auto remainder = pot.amount % static_cast<Chips>(winners.size());
+        const auto winnerCount = static_cast<Chips>(winners.size());
+        const auto chipUnit = chipDenominations_.front();
+        const auto share = (pot.amount / winnerCount / chipUnit) * chipUnit;
+        auto remainder = (pot.amount - share * winnerCount) / chipUnit;
         PayoutView payout{.amount = pot.amount};
         for (auto* winner : winners) {
-            const auto amount = share + (remainder-- > 0 ? 1 : 0);
+            const auto amount = share + (remainder-- > 0 ? chipUnit : 0);
             winner->stack += amount;
             payout.awards.push_back({.seat = winner->number, .amount = amount});
         }
@@ -621,7 +647,7 @@ void Table::submitAction(std::string_view playerName, Action action, Chips amoun
         actor.allIn = actor.stack == 0;
         break;
     case Action::bet:
-        if (!legal.bet || amount < legal.minimumAmount || amount > legal.maximumAmount) {
+        if (!legal.bet || amount < legal.minimumAmount || amount > legal.maximumAmount || !isChipValue(amount)) {
             throw CommandError(CommandFailure::illegalAction, "bet amount is outside the legal range");
         }
         committed = amount - actor.roundCommitted;
@@ -634,7 +660,7 @@ void Table::submitAction(std::string_view playerName, Action action, Chips amoun
         fullRaise = true;
         break;
     case Action::raise:
-        if (!legal.raise || amount < legal.minimumAmount || amount > legal.maximumAmount) {
+        if (!legal.raise || amount < legal.minimumAmount || amount > legal.maximumAmount || !isChipValue(amount)) {
             throw CommandError(CommandFailure::illegalAction, "raise amount is outside the legal range");
         }
         committed = amount - actor.roundCommitted;

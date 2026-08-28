@@ -45,7 +45,9 @@ Action request example:
 { "player": "Arizona", "action": "raise", "amount": 500, "expectedSequence": 41 }
 ```
 
-The action request also carries the API-player name in this unauthenticated scaffold. `amount` is an integer chip amount and, for a bet or raise, is the player's **total commitment in the current betting round**, not an additional increment. Check, call, and fold use `0`. A real authenticated adapter derives the player identity from its credential rather than accepting that field from the request body.
+The creation/list response includes `chipDenominations`, the positive, sorted denomination list active for that competition. Each table-view response repeats the same list so a client can render its wager controls from the authoritative table state. The server gets the list from its shared configuration when the competition is created; the client must not use a local configuration value for it.
+
+The action request also carries the API-player name in this unauthenticated scaffold. `amount` is an integer chip amount and, for a bet or raise, is the player's **total commitment in the current betting round**, not an additional increment. Check, call, and fold use `0`. Bet and raise totals must be multiples of the competition's smallest `chipDenominations` value. A real authenticated adapter derives the player identity from its credential rather than accepting that field from the request body.
 
 The action endpoint returns `400` for invalid syntax, `401/403` for authentication/authorization failure, `409` for a stale sequence or turn conflict, and `422` for a syntactically valid but illegal poker action.
 

@@ -14,12 +14,12 @@ The initial prototype uses one `TournamentCompetition`, one `Table`, at most eig
 | `FlavorRules` | rule policy: streets, hole/community count, betting form, showdown evaluation |
 | `Table` | seating, dealer button, hand lifecycle, turn and action validation |
 | `HandState` | deck, community, hole cards, betting rounds, action history, pots |
-| `Stack` | integer chip amounts; optional chip inventory for display/withdrawal |
+| `Stack` | integer chip amounts, always representable by the competition's smallest active denomination; optional chip inventory for display/withdrawal |
 | `Pot` / `SidePot` | amount and eligible seats, derived from committed amounts |
 | `PlayerController` | adapter interface for human/API/bot decisions; not the player identity |
 | `Dealer` | automated system actor that advances forced operations |
 
-Use integer chip units (`std::int64_t`) rather than floating point. In the initial fixed chip set, stack inventory may be represented as denomination counts, but betting legality and pots should operate on integer value. That keeps future currencies and tournament rebuy rules manageable.
+Use integer chip units (`std::int64_t`) rather than floating point. Every competition has a sorted, positive list of chip denominations. Its smallest denomination is the wagering unit: starting stacks, forced blinds, bets, raises, and awarded pots must be exact multiples of it. This preserves chip-representable stacks even when an odd chip is assigned while splitting a pot. The initial default is `25, 100, 500, 1000`; server configuration may replace it before a competition is created. Betting legality and pots otherwise operate on integer value, which keeps future currencies and tournament rebuy rules manageable.
 
 ## Hand ranking
 

@@ -23,4 +23,8 @@ int main() {
     assert(seatedApiPlayer.player.name == "Arizona");
     assert(seatedApiPlayer.player.kind == bluffskill::poker::PlayerKind::api);
     assert(seatedApiPlayer.seat == 7);
+
+    bluffskill::poker::House customChipsHouse{{}, {50, 200, 1'000}};
+    const auto customChipsCompetition = customChipsHouse.createSingleTableTournament({.maximumPlayers = 2, .startingStack = 7'000});
+    assert((customChipsCompetition.chipDenominations == bluffskill::poker::ChipDenominations{50, 200, 1'000}));
 }

@@ -712,22 +712,11 @@ public:
         amountEdit_->setMinimumWidth(115);
         connect(amountEdit_, &QLineEdit::editingFinished, this, [this] { normalizeWagerAmount(); });
         wagerLayout->addWidget(amountEdit_);
-        constexpr std::array<qint64, 4> denominations{25, 100, 500, 1000};
-        for (std::size_t index = 0; index < denominations.size(); ++index) {
-            auto* denominationLayout = new QVBoxLayout;
-            denominationUp_[index] = new QToolButton(actions);
-            denominationUp_[index]->setText("▲");
-            denominationDown_[index] = new QToolButton(actions);
-            denominationDown_[index]->setText("▼");
-            denominationUp_[index]->setEnabled(false);
-            denominationDown_[index]->setEnabled(false);
-            connect(denominationUp_[index], &QToolButton::clicked, this, [this, denomination = denominations[index]] { adjustWagerAmount(denomination); });
-            connect(denominationDown_[index], &QToolButton::clicked, this, [this, denomination = denominations[index]] { adjustWagerAmount(-denomination); });
-            denominationLayout->addWidget(denominationUp_[index], 0, Qt::AlignHCenter);
-            denominationLayout->addWidget(new QLabel(QLocale().toString(denominations[index]), actions), 0, Qt::AlignHCenter);
-            denominationLayout->addWidget(denominationDown_[index], 0, Qt::AlignHCenter);
-            wagerLayout->addLayout(denominationLayout);
-        }
+        denominationControls_ = new QWidget(actions);
+        denominationLayout_ = new QHBoxLayout(denominationControls_);
+        denominationLayout_->setContentsMargins(0, 0, 0, 0);
+        denominationLayout_->setSpacing(6);
+        wagerLayout->addWidget(denominationControls_);
         wagerLayout->addStretch(1);
         actionLayout->addLayout(wagerLayout);
         auto* blindsLayout = new QHBoxLayout;
@@ -1063,6 +1052,7 @@ private:
         remainingPlayersCaption_->setText(tableComplete_ ? "Table Winner" : "Remaining Players");
         remainingPlayers_->setText(tableComplete_ ? tableWinner : QString::number(remaining));
         const auto legal = view.value("legalActions").toObject();
+        setChipDenominations(view.value("chipDenominations").toArray());
         const auto currentBet = view.value("currentBet").toInteger();
         const auto callAmount = legal.value("callAmount").toInteger();
         blindAmounts_->setText(QLocale().toString(view.value("smallBlind").toInteger())
@@ -1083,7 +1073,7 @@ private:
         wagerMaximum_ = maximum;
         setWagerControlsEnabled(canSetAmount);
         if (canSetAmount) {
-            setWagerAmount(wagerMinimum_);
+            if (!amountEdit_->hasFocus()) setWagerAmount(wagerMinimum_);
         } else {
             amountEdit_->clear();
         }
@@ -1205,7 +1195,7 @@ private:
     }
 
     void setWagerAmount(qint64 amount) {
-        const auto normalized = std::clamp(amount, wagerMinimum_, wagerMaximum_);
+        const auto normalized = normalizedWagerAmount(amount);
         amountEdit_->setText(QString::number(normalized));
     }
 
@@ -1217,6 +1207,52 @@ private:
     void adjustWagerAmount(qint64 adjustment) {
         if (!amountEdit_->isEnabled()) return;
         setWagerAmount(wagerAmount() + adjustment);
+    }
+
+    void setChipDenominations(const QJsonArray& values) {
+        QVector<qint64> denominations;
+        for (const auto& value : values) {
+            const auto denomination = value.toInteger();
+            if (denomination > 0 && !denominations.contains(denomination)) denominations.append(denomination);
+        }
+        std::sort(denominations.begin(), denominations.end());
+        if (denominations == chipDenominations_) return;
+        chipDenominations_ = std::move(denominations);
+        while (auto* item = denominationLayout_->takeAt(0)) {
+            if (auto* widget = item->widget()) widget->deleteLater();
+            delete item;
+        }
+        denominationUp_.clear();
+        denominationDown_.clear();
+        for (const auto denomination : chipDenominations_) {
+            auto* controls = new QWidget(denominationControls_);
+            auto* controlsLayout = new QVBoxLayout(controls);
+            controlsLayout->setContentsMargins(0, 0, 0, 0);
+            auto* up = new QToolButton(controls);
+            up->setText("▲");
+            up->setEnabled(false);
+            auto* down = new QToolButton(controls);
+            down->setText("▼");
+            down->setEnabled(false);
+            connect(up, &QToolButton::clicked, this, [this, denomination] { adjustWagerAmount(denomination); });
+            connect(down, &QToolButton::clicked, this, [this, denomination] { adjustWagerAmount(-denomination); });
+            controlsLayout->addWidget(up, 0, Qt::AlignHCenter);
+            controlsLayout->addWidget(new QLabel(QLocale().toString(denomination), controls), 0, Qt::AlignHCenter);
+            controlsLayout->addWidget(down, 0, Qt::AlignHCenter);
+            denominationLayout_->addWidget(controls);
+            denominationUp_.append(up);
+            denominationDown_.append(down);
+        }
+    }
+
+    [[nodiscard]] qint64 normalizedWagerAmount(qint64 amount) const {
+        if (wagerMaximum_ < wagerMinimum_) return 0;
+        const auto bounded = std::max(amount, wagerMinimum_);
+        if (chipDenominations_.isEmpty()) return std::clamp(bounded, wagerMinimum_, wagerMaximum_);
+        const auto unit = chipDenominations_.front();
+        const auto roundedUp = ((bounded + unit - 1) / unit) * unit;
+        const auto maximumChipValue = (wagerMaximum_ / unit) * unit;
+        return std::clamp(std::min(roundedUp, maximumChipValue), wagerMinimum_, maximumChipValue);
     }
 
     void beginNextDealCountdown(int delayMilliseconds) {
@@ -1591,8 +1627,11 @@ private:
     QPushButton* pausePlayButton_{};
     QLineEdit* amountEdit_{};
     QLineEdit* blindAmounts_{};
-    std::array<QToolButton*, 4> denominationUp_{};
-    std::array<QToolButton*, 4> denominationDown_{};
+    QWidget* denominationControls_{};
+    QHBoxLayout* denominationLayout_{};
+    QVector<QToolButton*> denominationUp_;
+    QVector<QToolButton*> denominationDown_;
+    QVector<qint64> chipDenominations_;
     qint64 wagerMinimum_{};
     qint64 wagerMaximum_{};
     std::vector<QPushButton*> actionButtons_;

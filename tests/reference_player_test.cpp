@@ -9,6 +9,7 @@ bluffskill::poker::TableView privateTurn(std::string name, bluffskill::cards::Ca
     using namespace bluffskill::poker;
     TableView view;
     view.street = Street::preflop;
+    view.chipDenominations = {25, 100, 500, 1000};
     view.players.push_back({.name = std::move(name), .seat = 1, .stack = 1000, .acting = true, .holeCards = {first, second}});
     view.legalActions = LegalActions{.call = true, .raise = true, .fold = true, .callAmount = 100, .minimumAmount = 200, .maximumAmount = 1000};
     return view;
@@ -27,6 +28,7 @@ int main() {
     const auto boldDecision = bold.chooseResponse(aces, stableRandom);
     assert(boldDecision.action == Action::raise);
     assert(boldDecision.amount >= 200 && boldDecision.amount <= 1000);
+    assert(boldDecision.amount % 25 == 0);
 
     std::mt19937_64 cautiousRandom{7};
     ReferencePlayer cautious{"Bold", {.riskTolerance = 0.0, .optimism = 0.0, .variability = 0.0}};

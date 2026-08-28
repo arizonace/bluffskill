@@ -50,11 +50,15 @@ double handConfidence(const TableView& view, const TablePlayerView& player) {
     return std::clamp(confidence, 0.0, 1.0);
 }
 
-Chips sizedCommitment(const LegalActions& legal, double confidence, double riskTolerance, double variation) {
+Chips sizedCommitment(const LegalActions& legal, const ChipDenominations& denominations, double confidence, double riskTolerance, double variation) {
     if (legal.maximumAmount <= legal.minimumAmount) return legal.minimumAmount;
     const auto fraction = std::clamp(0.18 + confidence * 0.48 + riskTolerance * 0.26 + variation * 0.08, 0.0, 1.0);
     const auto span = static_cast<double>(legal.maximumAmount - legal.minimumAmount);
-    return legal.minimumAmount + static_cast<Chips>(std::llround(span * fraction));
+    const auto candidate = legal.minimumAmount + static_cast<Chips>(std::llround(span * fraction));
+    const auto unit = denominations.front();
+    const auto roundedUp = ((candidate + unit - 1) / unit) * unit;
+    const auto maximumChipValue = (legal.maximumAmount / unit) * unit;
+    return std::clamp(std::min(roundedUp, maximumChipValue), legal.minimumAmount, maximumChipValue);
 }
 
 } // namespace
@@ -76,6 +80,7 @@ ReferenceDecision ReferencePlayer::chooseResponse(const TableView& privateView, 
     }
 
     const auto& legal = *privateView.legalActions;
+    const auto denominations = privateView.chipDenominations.empty() ? defaultChipDenominations() : privateView.chipDenominations;
     std::uniform_real_distribution<double> noise(-1.0, 1.0);
     const auto variation = noise(random) * profile_.variability;
     const auto confidence = std::clamp(handConfidence(privateView, *player) + profile_.optimism * 0.18 + variation * 0.16, 0.0, 1.0);
@@ -85,14 +90,14 @@ ReferenceDecision ReferencePlayer::chooseResponse(const TableView& privateView, 
     if (legal.check) {
         const auto betScore = confidence + profile_.riskTolerance * 0.42 + variation * 0.12;
         if (legal.bet && betScore >= 0.94) {
-            return {.action = Action::bet, .amount = sizedCommitment(legal, confidence, profile_.riskTolerance, variation)};
+            return {.action = Action::bet, .amount = sizedCommitment(legal, denominations, confidence, profile_.riskTolerance, variation)};
         }
         return {.action = Action::check};
     }
 
     const auto raiseScore = confidence + profile_.riskTolerance * 0.40 + profile_.optimism * 0.12 - pressure * 0.35 + variation * 0.12;
     if (legal.raise && raiseScore >= 1.08) {
-        return {.action = Action::raise, .amount = sizedCommitment(legal, confidence, profile_.riskTolerance, variation)};
+        return {.action = Action::raise, .amount = sizedCommitment(legal, denominations, confidence, profile_.riskTolerance, variation)};
     }
 
     const auto callScore = confidence + profile_.riskTolerance * 0.34 + profile_.optimism * 0.12 + variation * 0.12;

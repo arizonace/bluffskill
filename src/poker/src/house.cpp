@@ -9,7 +9,8 @@
 
 namespace bluffskill::poker {
 
-House::House(BlindSchedule blindSchedule) : blindSchedule_(blindSchedule) {}
+House::House(BlindSchedule blindSchedule, ChipDenominations chipDenominations)
+    : blindSchedule_(blindSchedule), chipDenominations_(normalizedChipDenominations(std::move(chipDenominations))) {}
 
 std::string House::nextCompetitionName() const {
     constexpr std::array places{"Valhalla", "Toronto", "Westeros", "Pantheon", "Riverlands", "Solaris", "Mordor", "NorthPole"};
@@ -39,11 +40,12 @@ CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
         .name = nextCompetitionName(),
         .style = CompetitionStyle::tournament,
         .tournament = spec,
+        .chipDenominations = chipDenominations_,
         .tables = {{.name = "Red", .maximumSeats = spec.maximumPlayers}},
     };
     Competition competition{.summary = std::move(summary)};
     competition.tables.push_back(std::make_unique<Table>(competition.summary.tables.front().name,
-        competition.summary.tables.front().maximumSeats, static_cast<Chips>(spec.startingStack), blindSchedule_));
+        competition.summary.tables.front().maximumSeats, static_cast<Chips>(spec.startingStack), blindSchedule_, chipDenominations_));
     competitions_.push_back(std::move(competition));
     return summaryOf(competitions_.back());
 }

@@ -35,6 +35,13 @@
 
 namespace {
 
+bluffskill::poker::ChipDenominations pokerChipDenominations(const bluffskill::app_config::Settings& settings) {
+    bluffskill::poker::ChipDenominations denominations;
+    denominations.reserve(static_cast<std::size_t>(settings.chipDenominations.size()));
+    for (const auto denomination : settings.chipDenominations) denominations.push_back(denomination);
+    return denominations;
+}
+
 class SettingsDialog final : public QDialog {
 public:
     explicit SettingsDialog(const bluffskill::app_config::Settings& settings, QWidget* parent = nullptr) : QDialog(parent) {
@@ -112,7 +119,8 @@ class ServerWindow final : public QMainWindow {
 public:
     explicit ServerWindow(bluffskill::app_config::Settings settings)
         : house_({.handsPerLevel = static_cast<std::size_t>(settings.blindHandsPerLevel),
-                  .minutesPerLevel = std::chrono::minutes{settings.blindMinutesPerLevel}}), settings_(std::move(settings)) {
+                  .minutesPerLevel = std::chrono::minutes{settings.blindMinutesPerLevel}},
+              pokerChipDenominations(settings)), settings_(std::move(settings)) {
         setWindowTitle("BluffSkill Server");
         resize(1180, 600);
         auto* splitter = new QSplitter(this);
@@ -213,11 +221,14 @@ QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competi
                                        {"seat", static_cast<int>(seatedPlayer.seat)}});
         }
     }
+    QJsonArray chipDenominations;
+    for (const auto denomination : competition.chipDenominations) chipDenominations.append(static_cast<qint64>(denomination));
     return {{"name", QString::fromStdString(competition.name)},
             {"style", "Tournament"},
             {"table", QString::fromStdString(competition.tables.front().name)},
             {"maximumPlayers", static_cast<int>(competition.tournament.maximumPlayers)},
             {"startingStack", static_cast<int>(competition.tournament.startingStack)},
+            {"chipDenominations", chipDenominations},
             {"referencePlayers", players}};
 }
 
@@ -234,6 +245,8 @@ QJsonObject tableJson(const bluffskill::poker::TableSummary& table) {
 }
 
 QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
+    QJsonArray chipDenominations;
+    for (const auto denomination : table.chipDenominations) chipDenominations.append(static_cast<qint64>(denomination));
     QJsonArray players;
     for (const auto& player : table.players) {
         QJsonArray holeCards;
@@ -278,6 +291,7 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
         {"street", QString::fromUtf8(bluffskill::poker::toString(table.street))},
         {"currentBet", static_cast<qint64>(table.currentBet)},
         {"smallBlind", static_cast<qint64>(table.smallBlind)}, {"bigBlind", static_cast<qint64>(table.bigBlind)},
+        {"chipDenominations", chipDenominations},
         {"blindLevel", static_cast<qint64>(table.blindLevel)},
         {"dealerSeat", table.dealerSeat ? static_cast<int>(*table.dealerSeat) : 0},
         {"smallBlindSeat", table.smallBlindSeat ? static_cast<int>(*table.smallBlindSeat) : 0},

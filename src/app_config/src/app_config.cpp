@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
+#include <QRegularExpression>
 
 #include <algorithm>
 
@@ -17,6 +18,7 @@ constexpr int defaultAutomatedPlayerDelayMilliseconds = 1'000;
 constexpr int defaultBlindHandsPerLevel = 16;
 constexpr int defaultBlindMinutesPerLevel = 20;
 constexpr quint16 defaultPorts[] = {53153, 53154, 53155};
+constexpr qint64 defaultChipDenominations[] = {25, 100, 500, 1000};
 
 Settings normalized(Settings settings) {
     settings.playerClockSeconds = std::clamp(settings.playerClockSeconds, 5, 3'600);
@@ -25,6 +27,15 @@ Settings normalized(Settings settings) {
     settings.automatedPlayerDelayMilliseconds = std::clamp(settings.automatedPlayerDelayMilliseconds, 1, 3'600'000);
     settings.blindHandsPerLevel = std::clamp(settings.blindHandsPerLevel, 1, 10'000);
     settings.blindMinutesPerLevel = std::clamp(settings.blindMinutesPerLevel, 1, 3'600);
+    QList<qint64> denominations;
+    for (const auto denomination : settings.chipDenominations) {
+        if (denomination > 0 && !denominations.contains(denomination)) denominations.append(denomination);
+    }
+    std::sort(denominations.begin(), denominations.end());
+    if (denominations.isEmpty()) {
+        for (const auto denomination : defaultChipDenominations) denominations.append(denomination);
+    }
+    settings.chipDenominations = denominations;
     settings.defaultPlayerName = settings.defaultPlayerName.trimmed();
     if (settings.defaultPlayerName.isEmpty()) settings.defaultPlayerName = "Player";
 
@@ -58,6 +69,13 @@ Settings AppConfig::load() {
     settings.automatedPlayerDelayMilliseconds = store.value("timers/automatedPlayerDelayMilliseconds", defaultAutomatedPlayerDelayMilliseconds).toInt();
     settings.blindHandsPerLevel = store.value("blinds/handsPerLevel", defaultBlindHandsPerLevel).toInt();
     settings.blindMinutesPerLevel = store.value("blinds/minutesPerLevel", defaultBlindMinutesPerLevel).toInt();
+    settings.chipDenominations.clear();
+    const auto denominationText = store.value("chips/denominations").toStringList().join(',');
+    for (const auto& token : denominationText.split(QRegularExpression("[,\\s]+"), Qt::SkipEmptyParts)) {
+        bool valid = false;
+        const auto denomination = token.toLongLong(&valid);
+        if (valid && denomination > 0) settings.chipDenominations.append(denomination);
+    }
     settings.defaultPlayerName = store.value("client/defaultPlayerName", settings.defaultPlayerName).toString();
     settings.clientAutoConnect = store.value("client/autoConnect", false).toBool();
     settings.serverPreferredPorts.clear();
@@ -82,6 +100,9 @@ void AppConfig::save(const Settings& input) {
     store.setValue("timers/automatedPlayerDelayMilliseconds", settings.automatedPlayerDelayMilliseconds);
     store.setValue("blinds/handsPerLevel", settings.blindHandsPerLevel);
     store.setValue("blinds/minutesPerLevel", settings.blindMinutesPerLevel);
+    QStringList denominations;
+    for (const auto denomination : settings.chipDenominations) denominations.append(QString::number(denomination));
+    store.setValue("chips/denominations", denominations);
     store.setValue("client/defaultPlayerName", settings.defaultPlayerName);
     store.setValue("client/autoConnect", settings.clientAutoConnect);
     QStringList ports;

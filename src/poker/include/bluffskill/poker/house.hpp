@@ -34,13 +34,14 @@ struct CompetitionSummary {
     std::string name;
     CompetitionStyle style{CompetitionStyle::tournament};
     TournamentSpec tournament;
+    ChipDenominations chipDenominations;
     std::vector<TableSummary> tables;
 };
 
 class House {
 public:
     // `House` is the one singleton per server process. The application owns it.
-    explicit House(BlindSchedule blindSchedule = {});
+    explicit House(BlindSchedule blindSchedule = {}, ChipDenominations chipDenominations = defaultChipDenominations());
     [[nodiscard]] CompetitionSummary createSingleTableTournament(TournamentSpec spec);
     [[nodiscard]] CompetitionSummary createReferencePlayers(std::string_view competitionName, std::size_t count);
     [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
@@ -79,6 +80,7 @@ private:
 
     std::mt19937_64 random_{std::random_device{}()};
     BlindSchedule blindSchedule_;
+    ChipDenominations chipDenominations_;
     std::vector<Competition> competitions_;
 };
 

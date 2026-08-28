@@ -40,6 +40,15 @@ int main() {
     const auto botOneTurn = table.viewFor("BotOne");
     assert(botOneTurn.actingSeat == 2);
     assert(botOneTurn.legalActions && botOneTurn.legalActions->raise);
+    assert((botOneTurn.chipDenominations == ChipDenominations{25, 100, 500, 1000}));
+
+    try {
+        table.submitAction("BotOne", Action::raise, 201, botOneTurn.eventSequence);
+        assert(false && "a raise must be representable in active chip denominations");
+    } catch (const CommandError& error) {
+        assert(error.failure() == CommandFailure::illegalAction);
+        assert(table.viewFor("BotOne").eventSequence == botOneTurn.eventSequence);
+    }
 
     try {
         table.submitAction("BotOne", Action::call, 0, aliceView.eventSequence);

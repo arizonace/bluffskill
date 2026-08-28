@@ -12,6 +12,7 @@ struct Settings {
     int automatedPlayerDelayMilliseconds{1'000};
     int blindHandsPerLevel{16};
     int blindMinutesPerLevel{20};
+    QList<qint64> chipDenominations{25, 100, 500, 1000};
     QString defaultPlayerName{"Player"};
     QList<quint16> serverPreferredPorts{53153, 53154, 53155};
     bool clientAutoConnect{false};

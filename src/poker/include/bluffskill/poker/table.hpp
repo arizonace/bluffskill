@@ -16,6 +16,13 @@
 namespace bluffskill::poker {
 
 using Chips = std::int64_t;
+using ChipDenominations = std::vector<Chips>;
+
+// Values are sorted, unique, and positive.  The smallest denomination is the
+// wagering unit: every posted blind, bet, raise, stack, and award is a multiple
+// of it, so a table never creates a value that cannot be represented in chips.
+[[nodiscard]] ChipDenominations normalizedChipDenominations(ChipDenominations denominations);
+[[nodiscard]] ChipDenominations defaultChipDenominations();
 
 struct BlindSchedule {
     std::size_t handsPerLevel{16};
@@ -93,6 +100,7 @@ struct TableView {
     Chips currentBet{0}; // Largest commitment in the active betting round.
     Chips smallBlind{0};
     Chips bigBlind{0};
+    ChipDenominations chipDenominations;
     std::size_t blindLevel{0};
     std::optional<std::size_t> dealerSeat;
     std::optional<std::size_t> smallBlindSeat;
@@ -113,7 +121,8 @@ struct TableView {
 // Table is the poker-action serialization boundary. It has no Qt or transport dependency.
 class Table {
 public:
-    Table(std::string name, std::size_t maximumSeats, Chips startingStack, BlindSchedule blindSchedule = {});
+    Table(std::string name, std::size_t maximumSeats, Chips startingStack, BlindSchedule blindSchedule = {},
+        ChipDenominations chipDenominations = defaultChipDenominations());
     ~Table();
 
     void seatPlayer(std::string name, PlayerKind kind, std::size_t seat, Chips stack);
@@ -150,11 +159,13 @@ private:
     void advanceBlindLevelIfDue();
     [[nodiscard]] Chips smallBlindAmount() const;
     [[nodiscard]] Chips bigBlindAmount() const;
+    [[nodiscard]] bool isChipValue(Chips amount) const noexcept;
     [[nodiscard]] bool hasSingleLiveSeat() const;
 
     std::string name_;
     std::size_t maximumSeats_{0};
     Chips startingStack_{0};
+    ChipDenominations chipDenominations_;
     BlindSchedule blindSchedule_;
     std::size_t blindLevel_{0};
     std::size_t handsAtCurrentBlindLevel_{0};
