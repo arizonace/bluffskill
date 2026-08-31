@@ -213,6 +213,7 @@ private:
         std::uint64_t sequence{0};
         QHash<int, qint64> handStartingStacks;
         QSet<int> loggedBustedSeats;
+        qint64 lastBigBlind{0};
     };
 
     void appendActionLogRow(const QString& player, const QString& round, const QString& action, const QString& value = {}) {
@@ -222,6 +223,7 @@ private:
         actionLog_->setItem(row, 1, new QTableWidgetItem(round));
         actionLog_->setItem(row, 2, new QTableWidgetItem(action));
         actionLog_->setItem(row, 3, new QTableWidgetItem(value));
+        actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
     }
 
     static QString actionFingerprint(const bluffskill::poker::ActionView& action) {
@@ -248,7 +250,13 @@ private:
                     const auto dealer = std::ranges::find_if(view.players, [seat = view.dealerSeat](const auto& player) {
                         return seat && player.seat == *seat;
                     });
-                    appendActionLogRow(dealer == view.players.end() ? QString{} : QString::fromStdString(dealer->name), "Deal", "Deal");
+                    const auto dealerName = dealer == view.players.end() ? QString{} : QString::fromStdString(dealer->name);
+                    const auto bigBlind = static_cast<qint64>(view.bigBlind);
+                    if (cursor.lastBigBlind > 0 && bigBlind > cursor.lastBigBlind) {
+                        appendActionLogRow(dealerName, "Deal", "Blinds Up", QLocale().toString(bigBlind));
+                    }
+                    appendActionLogRow(dealerName, "Deal", "Deal");
+                    cursor.lastBigBlind = bigBlind;
                     cursor.history.clear();
                     cursor.handStartingStacks.clear();
                     cursor.loggedBustedSeats.clear();
