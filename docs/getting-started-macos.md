@@ -11,9 +11,6 @@ Current local baseline verified on 2026-08-26:
 | Apple Clang | 21.0.0 |
 | CMake | 4.4.2 |
 | Qt | 6.11.1 |
-| Homebrew | 6.0.19 |
-
-Homebrew reported no outdated `cmake`, `qt`, `git`, or `llvm` formulae. Qt is installed under Homebrew, so its CMake configuration is discovered automatically on this machine.
 
 ## Build and test
 
@@ -27,9 +24,6 @@ ctest --test-dir build --output-on-failure
 
 Run either application from `build/apps/server/` or `build/apps/client/`. The server chooses a free localhost port and prints it in its visible console.
 
-## Development workflow
-
-- Before changing a repository, check its working-tree status. Warn when it has uncommitted changes unless the user has explicitly asked to work with them. No warning is necessary for committed changes that have not yet been pushed. Preserve every existing change and never commit on the user's behalf.
 
 ## Chip denominations
 
