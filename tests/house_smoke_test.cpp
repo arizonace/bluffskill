@@ -17,12 +17,18 @@ int main() {
     }
     assert(names.size() == 6);
     assert(seats == std::set<std::size_t>({1, 2, 3, 4, 5, 6}));
+    const auto profile = house.referencePlayerProfile(created.name, "Red", *names.begin());
+    assert(profile);
+    assert(profile->riskTolerance >= 0.15 && profile->riskTolerance <= 0.85);
+    assert(profile->optimism >= 0.15 && profile->optimism <= 0.85);
+    assert(profile->variability >= 0.15 && profile->variability <= 0.85);
 
     const auto withApiPlayer = house.createApiPlayer(created.name, "Red", "Arizona");
     const auto& seatedApiPlayer = withApiPlayer.tables.front().players.back();
     assert(seatedApiPlayer.player.name == "Arizona");
     assert(seatedApiPlayer.player.kind == bluffskill::poker::PlayerKind::api);
     assert(seatedApiPlayer.seat == 7);
+    assert(!house.referencePlayerProfile(created.name, "Red", "Arizona"));
 
     bluffskill::poker::House stagedHouse;
     const auto staged = stagedHouse.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7'000});

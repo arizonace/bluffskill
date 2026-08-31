@@ -15,6 +15,7 @@ constexpr int defaultPlayerClockSeconds = 120;
 constexpr int defaultDealClockSeconds = 20;
 constexpr int defaultUninterruptedDealerDelayMilliseconds = 5'000;
 constexpr int defaultAutomatedPlayerDelayMilliseconds = 1'000;
+constexpr int defaultSmallBlind = 1;
 constexpr int defaultBlindHandsPerLevel = 16;
 constexpr int defaultBlindMinutesPerLevel = 20;
 constexpr quint16 defaultPorts[] = {53153, 53154, 53155};
@@ -25,6 +26,7 @@ Settings normalized(Settings settings) {
     settings.dealClockSeconds = std::clamp(settings.dealClockSeconds, 1, 3'600);
     settings.uninterruptedDealerDelayMilliseconds = std::clamp(settings.uninterruptedDealerDelayMilliseconds, 1, 3'600'000);
     settings.automatedPlayerDelayMilliseconds = std::clamp(settings.automatedPlayerDelayMilliseconds, 1, 3'600'000);
+    settings.smallBlind = std::clamp(settings.smallBlind, 1, 1'000'000);
     settings.blindHandsPerLevel = std::clamp(settings.blindHandsPerLevel, 1, 10'000);
     settings.blindMinutesPerLevel = std::clamp(settings.blindMinutesPerLevel, 1, 3'600);
     QList<qint64> denominations;
@@ -67,6 +69,7 @@ Settings AppConfig::load() {
     settings.dealClockSeconds = store.value("timers/dealClockSeconds", defaultDealClockSeconds).toInt();
     settings.uninterruptedDealerDelayMilliseconds = store.value("timers/uninterruptedDealerDelayMilliseconds", defaultUninterruptedDealerDelayMilliseconds).toInt();
     settings.automatedPlayerDelayMilliseconds = store.value("timers/automatedPlayerDelayMilliseconds", defaultAutomatedPlayerDelayMilliseconds).toInt();
+    settings.smallBlind = store.value("blinds/smallBlind", defaultSmallBlind).toInt();
     settings.blindHandsPerLevel = store.value("blinds/handsPerLevel", defaultBlindHandsPerLevel).toInt();
     settings.blindMinutesPerLevel = store.value("blinds/minutesPerLevel", defaultBlindMinutesPerLevel).toInt();
     settings.chipDenominations.clear();
@@ -98,6 +101,7 @@ void AppConfig::save(const Settings& input) {
     store.setValue("timers/dealClockSeconds", settings.dealClockSeconds);
     store.setValue("timers/uninterruptedDealerDelayMilliseconds", settings.uninterruptedDealerDelayMilliseconds);
     store.setValue("timers/automatedPlayerDelayMilliseconds", settings.automatedPlayerDelayMilliseconds);
+    store.setValue("blinds/smallBlind", settings.smallBlind);
     store.setValue("blinds/handsPerLevel", settings.blindHandsPerLevel);
     store.setValue("blinds/minutesPerLevel", settings.blindMinutesPerLevel);
     QStringList denominations;

@@ -10,6 +10,7 @@ struct Settings {
     int dealClockSeconds{20};
     int uninterruptedDealerDelayMilliseconds{5'000};
     int automatedPlayerDelayMilliseconds{1'000};
+    int smallBlind{1}; // Number of smallest chip.
     int blindHandsPerLevel{16};
     int blindMinutesPerLevel{20};
     QList<qint64> chipDenominations{25, 100, 500, 1000};

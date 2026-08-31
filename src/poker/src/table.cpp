@@ -13,9 +13,6 @@ namespace bluffskill::poker {
 
 namespace {
 
-constexpr Chips baseSmallBlind = 50;
-constexpr Chips baseBigBlind = 100;
-
 bool sameName(std::string_view left, std::string_view right) {
     return left == right;
 }
@@ -199,8 +196,8 @@ Table::Table(std::string name, std::size_t maximumSeats, Chips startingStack, Bl
     : name_(std::move(name)), maximumSeats_(maximumSeats), startingStack_(startingStack),
       chipDenominations_(normalizedChipDenominations(std::move(chipDenominations))), blindSchedule_(blindSchedule) {
     if (maximumSeats_ == 0 || startingStack_ <= 0) throw std::invalid_argument("table requires seats and a positive starting stack");
-    if (!isChipValue(startingStack_) || !isChipValue(baseSmallBlind) || !isChipValue(baseBigBlind)) {
-        throw std::invalid_argument("starting stack and blind amounts must be multiples of the smallest chip denomination");
+    if (!isChipValue(startingStack_)) {
+        throw std::invalid_argument("starting stack must be a multiple of the smallest chip denomination");
     }
     setBlindSchedule(blindSchedule_);
 }
@@ -269,17 +266,23 @@ void Table::setBlindSchedule(BlindSchedule blindSchedule) {
     if (blindSchedule.handsPerLevel == 0 || blindSchedule.minutesPerLevel.count() <= 0) {
         throw std::invalid_argument("blind schedule requires positive hand and minute intervals");
     }
+    if (blindSchedule.smallBlind == 0) {
+        blindSchedule.smallBlind = blindSchedule_.smallBlind == 0 ? chipDenominations_.front() : blindSchedule_.smallBlind;
+    }
+    if (blindSchedule.smallBlind < 0 || !isChipValue(blindSchedule.smallBlind)) {
+        throw std::invalid_argument("small blind must be a positive multiple of the smallest chip denomination");
+    }
     blindSchedule_ = blindSchedule;
 }
 
 Chips Table::smallBlindAmount() const {
     const auto multiplier = static_cast<Chips>(1) << std::min<std::size_t>(blindLevel_, 20);
-    return baseSmallBlind * multiplier;
+    return blindSchedule_.smallBlind * multiplier;
 }
 
 Chips Table::bigBlindAmount() const {
     const auto multiplier = static_cast<Chips>(1) << std::min<std::size_t>(blindLevel_, 20);
-    return baseBigBlind * multiplier;
+    return blindSchedule_.smallBlind * 2 * multiplier;
 }
 
 bool Table::isChipValue(Chips amount) const noexcept {

@@ -7,6 +7,7 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QHash>
 #include <QHttpServer>
 #include <QHttpServerRequest>
 #include <QHttpServerResponse>
@@ -30,6 +31,7 @@
 #include <QVBoxLayout>
 
 #include <array>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 
@@ -42,6 +44,14 @@ bluffskill::poker::ChipDenominations pokerChipDenominations(const bluffskill::ap
     return denominations;
 }
 
+bluffskill::poker::BlindSchedule pokerBlindSchedule(const bluffskill::app_config::Settings& settings) {
+    return {
+        .handsPerLevel = static_cast<std::size_t>(settings.blindHandsPerLevel),
+        .minutesPerLevel = std::chrono::minutes{settings.blindMinutesPerLevel},
+        .smallBlind = static_cast<bluffskill::poker::Chips>(settings.chipDenominations.front()) * settings.smallBlind,
+    };
+}
+
 class SettingsDialog final : public QDialog {
 public:
     explicit SettingsDialog(const bluffskill::app_config::Settings& settings, QWidget* parent = nullptr) : QDialog(parent) {
@@ -51,6 +61,8 @@ public:
         dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
         uninterruptedDealerDelay_ = delaySpinBox(settings.uninterruptedDealerDelayMilliseconds, this);
         automatedPlayerDelay_ = delaySpinBox(settings.automatedPlayerDelayMilliseconds, this);
+        smallBlind_ = new QSpinBox(this); smallBlind_->setRange(1, 1'000'000); smallBlind_->setValue(settings.smallBlind);
+        smallBlind_->setToolTip("Number of smallest chip.");
         blindHands_ = new QSpinBox(this); blindHands_->setRange(1, 10000); blindHands_->setValue(settings.blindHandsPerLevel);
         blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
@@ -62,6 +74,7 @@ public:
         layout->addRow("Deal Clock (seconds)", dealClock_);
         layout->addRow("Uninterrupted Dealer Delay", uninterruptedDealerDelay_);
         layout->addRow("Automated Player Delay", automatedPlayerDelay_);
+        layout->addRow("Small Blind (number of smallest chip)", smallBlind_);
         layout->addRow("Blind Increase (hands)", blindHands_);
         layout->addRow("Blind Increase (minutes)", blindMinutes_);
         layout->addRow("Default Player Name", defaultPlayerName_);
@@ -80,6 +93,7 @@ public:
         value.dealClockSeconds = dealClock_->value();
         value.uninterruptedDealerDelayMilliseconds = milliseconds(*uninterruptedDealerDelay_);
         value.automatedPlayerDelayMilliseconds = milliseconds(*automatedPlayerDelay_);
+        value.smallBlind = smallBlind_->value();
         value.blindHandsPerLevel = blindHands_->value();
         value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
@@ -108,6 +122,7 @@ private:
     QSpinBox* dealClock_{};
     QDoubleSpinBox* uninterruptedDealerDelay_{};
     QDoubleSpinBox* automatedPlayerDelay_{};
+    QSpinBox* smallBlind_{};
     QSpinBox* blindHands_{};
     QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
@@ -118,9 +133,7 @@ private:
 class ServerWindow final : public QMainWindow {
 public:
     explicit ServerWindow(bluffskill::app_config::Settings settings)
-        : house_({.handsPerLevel = static_cast<std::size_t>(settings.blindHandsPerLevel),
-                  .minutesPerLevel = std::chrono::minutes{settings.blindMinutesPerLevel}},
-              pokerChipDenominations(settings)), settings_(std::move(settings)) {
+        : house_(pokerBlindSchedule(settings), pokerChipDenominations(settings)), settings_(std::move(settings)) {
         setWindowTitle("BluffSkill Server");
         resize(1180, 600);
         auto* splitter = new QSplitter(this);
@@ -158,7 +171,15 @@ public:
             for (const auto& table : competition.tables) {
                 auto* tableItem = new QTreeWidgetItem(competitionItem, {QString::fromStdString(table.name) + " (" + QString::number(table.players.size()) + " / " + QString::number(table.maximumSeats) + ")"});
                 for (const auto& seatedPlayer : table.players) {
-                    new QTreeWidgetItem(tableItem, {QString::number(seatedPlayer.seat) + ": " + QString::fromStdString(seatedPlayer.player.name) + " (" + QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind)) + ")"});
+                    auto* playerItem = new QTreeWidgetItem(tableItem, {QString::number(seatedPlayer.seat) + ": "
+                        + QString::fromStdString(seatedPlayer.player.name) + " ("
+                        + QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind)) + ")"});
+                    const auto profile = house_.referencePlayerProfile(competition.name, table.name, seatedPlayer.player.name);
+                    if (!profile) continue;
+                    auto* parameters = new QTreeWidgetItem(playerItem, {"Operating parameters"});
+                    new QTreeWidgetItem(parameters, {"riskTolerance: " + QString::number(profile->riskTolerance, 'f', 2)});
+                    new QTreeWidgetItem(parameters, {"optimism: " + QString::number(profile->optimism, 'f', 2)});
+                    new QTreeWidgetItem(parameters, {"variability: " + QString::number(profile->variability, 'f', 2)});
                 }
             }
         }
@@ -174,9 +195,8 @@ private:
         if (dialog.exec() != QDialog::Accepted) return;
         settings_ = dialog.settings(settings_);
         bluffskill::app_config::AppConfig::save(settings_);
-        house_.setBlindSchedule({.handsPerLevel = static_cast<std::size_t>(settings_.blindHandsPerLevel),
-            .minutesPerLevel = std::chrono::minutes{settings_.blindMinutesPerLevel}});
-        QMessageBox::information(this, "Settings saved", "Settings are shared with the client. Blind levels use the new schedule; preferred ports are used the next time the server starts.");
+        house_.setBlindSchedule(pokerBlindSchedule(settings_));
+        QMessageBox::information(this, "Settings saved", "Settings are shared with the client. Blind settings apply to new hands; preferred ports are used the next time the server starts.");
     }
 
     void showAbout() {
@@ -187,19 +207,52 @@ private:
                 + "\n\n© AzoneLayer · azonelayer.com\nLicensed under the MIT License.");
     }
 
+    struct ActionLogCursor {
+        QStringList history;
+        std::uint64_t sequence{0};
+    };
+
+    void appendActionLogRow(const QString& player, const QString& round, const QString& action, const QString& value = {}) {
+        const auto row = actionLog_->rowCount();
+        actionLog_->insertRow(row);
+        actionLog_->setItem(row, 0, new QTableWidgetItem(player));
+        actionLog_->setItem(row, 1, new QTableWidgetItem(round));
+        actionLog_->setItem(row, 2, new QTableWidgetItem(action));
+        actionLog_->setItem(row, 3, new QTableWidgetItem(value));
+    }
+
+    static QString actionFingerprint(const bluffskill::poker::ActionView& action) {
+        return QString::number(action.seat) + '\x1f' + QString::fromStdString(action.player) + '\x1f'
+            + QString::fromUtf8(bluffskill::poker::toString(action.street)) + '\x1f'
+            + QString::fromUtf8(bluffskill::poker::toString(action.action)) + '\x1f' + QString::number(action.amount);
+    }
+
     void refreshActionLog() {
-        actionLog_->setRowCount(0);
         for (const auto& competition : house_.competitions()) {
             for (const auto& table : competition.tables) {
                 const auto view = house_.tableView(competition.name, table.name);
-                for (const auto& action : view.actionHistory) {
-                    const auto row = actionLog_->rowCount();
-                    actionLog_->insertRow(row);
-                    actionLog_->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(action.player)));
-                    actionLog_->setItem(row, 1, new QTableWidgetItem(QString::fromUtf8(bluffskill::poker::toString(action.street))));
-                    actionLog_->setItem(row, 2, new QTableWidgetItem(QString::fromUtf8(bluffskill::poker::toString(action.action))));
-                    actionLog_->setItem(row, 3, new QTableWidgetItem(action.amount == 0 ? QString{} : QLocale().toString(action.amount)));
+                QStringList history;
+                for (const auto& action : view.actionHistory) history.append(actionFingerprint(action));
+                const auto tableKey = QString::fromStdString(competition.name) + '/' + QString::fromStdString(table.name);
+                auto& cursor = actionLogCursors_[tableKey];
+                const auto continues = cursor.history.size() <= history.size()
+                    && std::equal(cursor.history.cbegin(), cursor.history.cend(), history.cbegin());
+                const auto appendedActions = continues ? history.size() - cursor.history.size() : 0;
+                const auto sequenceIndicatesNewDeal = cursor.sequence != 0
+                    && view.eventSequence > cursor.sequence + static_cast<std::uint64_t>(appendedActions);
+                const auto newDeal = !history.isEmpty() && (cursor.history.isEmpty() || !continues || sequenceIndicatesNewDeal);
+                if (newDeal) {
+                    appendActionLogRow({}, "Deal", "Deal");
+                    cursor.history.clear();
                 }
+                for (qsizetype index = cursor.history.size(); index < view.actionHistory.size(); ++index) {
+                    const auto& action = view.actionHistory[static_cast<std::size_t>(index)];
+                    appendActionLogRow(QString::fromStdString(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
+                        QString::fromUtf8(bluffskill::poker::toString(action.action)),
+                        action.amount == 0 ? QString{} : QLocale().toString(action.amount));
+                }
+                cursor.history = std::move(history);
+                cursor.sequence = view.eventSequence;
             }
         }
     }
@@ -209,6 +262,7 @@ private:
     QTreeWidget* tree_{};
     QPlainTextEdit* log_{};
     QTableWidget* actionLog_{};
+    QHash<QString, ActionLogCursor> actionLogCursors_;
 };
 
 QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competition) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bluffskill/poker/player.hpp"
+#include "bluffskill/poker/reference_player.hpp"
 #include "bluffskill/poker/table.hpp"
 
 #include <cstddef>
@@ -48,6 +49,9 @@ public:
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
     [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
     [[nodiscard]] TableView tableView(std::string_view competitionName, std::string_view tableName, std::string_view viewerName = {}) const;
+    // Server-console inspection only. REST adapters must never project bot profiles.
+    [[nodiscard]] std::optional<ReferencePlayerProfile> referencePlayerProfile(
+        std::string_view competitionName, std::string_view tableName, std::string_view playerName) const;
     void submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
         Action action, Chips amount, std::uint64_t expectedSequence);
     void startNextHand(std::string_view competitionName, std::string_view tableName);

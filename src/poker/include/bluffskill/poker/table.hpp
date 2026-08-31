@@ -28,6 +28,7 @@ using ChipDenominations = std::vector<Chips>;
 struct BlindSchedule {
     std::size_t handsPerLevel{16};
     std::chrono::minutes minutesPerLevel{20};
+    Chips smallBlind{0}; // Zero selects the table's smallest chip denomination.
 };
 
 enum class Street { waiting, preflop, flop, turn, river, showdown };

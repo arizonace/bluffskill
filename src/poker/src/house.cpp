@@ -217,6 +217,18 @@ TableView House::tableView(std::string_view competitionName, std::string_view ta
     return findTable(*competition, tableName).viewFor(viewerName);
 }
 
+std::optional<ReferencePlayerProfile> House::referencePlayerProfile(
+    std::string_view competitionName, std::string_view tableName, std::string_view playerName) const {
+    const auto* competition = findCompetition(competitionName);
+    if (competition == nullptr) return std::nullopt;
+    const auto tableIndex = findTableIndex(*competition, tableName);
+    const auto player = std::ranges::find_if(competition->players, [tableIndex, playerName](const auto& candidate) {
+        return candidate.tableIndex == tableIndex && candidate.player->name() == playerName;
+    });
+    if (player == competition->players.end() || player->player->kind() != PlayerKind::reference) return std::nullopt;
+    return static_cast<const ReferencePlayer&>(*player->player).profile();
+}
+
 void House::submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
     Action action, Chips amount, std::uint64_t expectedSequence) {
     auto& competition = findCompetition(competitionName);

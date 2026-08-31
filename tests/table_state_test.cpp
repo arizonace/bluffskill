@@ -12,7 +12,7 @@ int main() {
     }
 
     Table table("Red", 3, 200);
-    table.seatPlayer("Alice", PlayerKind::api, 1, 100);
+    table.seatPlayer("Alice", PlayerKind::api, 1, 50);
     table.seatPlayer("BotOne", PlayerKind::reference, 2, 200);
     table.seatPlayer("BotTwo", PlayerKind::reference, 3, 200);
     table.startHand();
@@ -20,15 +20,17 @@ int main() {
     const auto publicView = table.viewFor();
     const auto aliceView = table.viewFor("Alice");
     assert(publicView.street == Street::preflop);
-    assert(publicView.currentBet == 100);
+    assert(publicView.currentBet == 50);
+    assert(publicView.smallBlind == 25);
+    assert(publicView.bigBlind == 50);
     assert(publicView.actingSeat == 1);
     assert(publicView.smallBlindSeat == 2);
     assert(publicView.bigBlindSeat == 3);
     assert(publicView.actionHistory.size() == 2);
     assert(publicView.actionHistory[0].action == Action::smallBlind);
-    assert(publicView.actionHistory[0].amount == 50);
+    assert(publicView.actionHistory[0].amount == 25);
     assert(publicView.actionHistory[1].action == Action::bigBlind);
-    assert(publicView.actionHistory[1].amount == 100);
+    assert(publicView.actionHistory[1].amount == 50);
     assert(publicView.players.front().holeCards.empty());
     assert(aliceView.players.front().holeCards.size() == 2);
     assert(aliceView.legalActions && aliceView.legalActions->call);
@@ -76,9 +78,9 @@ int main() {
     assert(!finished.actingSeat);
     assert(finished.communityCards.size() == 5);
     assert(finished.pots.size() == 2);
-    assert(finished.pots[0].amount == 300);
+    assert(finished.pots[0].amount == 150);
     assert(finished.pots[0].eligibleSeats.size() == 3);
-    assert(finished.pots[1].amount == 200);
+    assert(finished.pots[1].amount == 300);
     assert((finished.pots[1].eligibleSeats == std::vector<std::size_t>{2, 3}));
     assert(finished.showdownOccurred);
     assert(finished.players[1].holeCards.size() == 2);
@@ -87,8 +89,13 @@ int main() {
     assert(!finished.players[1].showdownDescription.empty());
     assert(!finished.players[2].showdownDescription.empty());
     assert(finished.payouts.size() == 2);
-    assert(finished.payouts[0].amount == 300);
-    assert(finished.payouts[1].amount == 200);
+    assert(finished.payouts[0].amount == 150);
+    assert(finished.payouts[1].amount == 300);
+
+    Table configuredSmallBlind("Configured small blind", 2, 1'000,
+        BlindSchedule{.smallBlind = 50});
+    assert(configuredSmallBlind.viewFor().smallBlind == 50);
+    assert(configuredSmallBlind.viewFor().bigBlind == 100);
 
     // Uneven action without an all-in remains one pot; side pots only cap an
     // all-in player's eligibility.
@@ -138,23 +145,23 @@ int main() {
     assert(restarted.street == Street::preflop);
     assert(restarted.dealerSeat == 1);
     assert(restarted.players[0].stack == 500);
-    assert(restarted.players[1].stack == 450);
-    assert(restarted.players[2].stack == 400);
+    assert(restarted.players[1].stack == 475);
+    assert(restarted.players[2].stack == 450);
 
     Table blindLevels("Blind levels", 3, 1000, BlindSchedule{.handsPerLevel = 1, .minutesPerLevel = std::chrono::minutes{60}});
     blindLevels.seatPlayer("A", PlayerKind::api, 1, 1000);
     blindLevels.seatPlayer("B", PlayerKind::api, 2, 1000);
     blindLevels.seatPlayer("C", PlayerKind::api, 3, 1000);
     blindLevels.startHand();
-    assert(blindLevels.viewFor().smallBlind == 50);
+    assert(blindLevels.viewFor().smallBlind == 25);
     auto blindView = blindLevels.viewFor("A");
     blindLevels.submitAction("A", Action::fold, 0, blindView.eventSequence);
     blindView = blindLevels.viewFor("B");
     blindLevels.submitAction("B", Action::fold, 0, blindView.eventSequence);
     blindLevels.startNextHand();
     assert(blindLevels.viewFor().blindLevel == 1);
-    assert(blindLevels.viewFor().smallBlind == 100);
-    assert(blindLevels.viewFor().bigBlind == 200);
+    assert(blindLevels.viewFor().smallBlind == 50);
+    assert(blindLevels.viewFor().bigBlind == 100);
 
     // The big blind starts the raise amount. Each successive minimum raise is
     // the current bet plus the size of the preceding full raise.
@@ -164,19 +171,19 @@ int main() {
     minimumRaises.seatPlayer("Big", PlayerKind::api, 3, 2'000);
     minimumRaises.startHand();
     auto raiseView = minimumRaises.viewFor("Opener");
-    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 200);
+    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 100);
     minimumRaises.submitAction("Opener", Action::raise, 300, raiseView.eventSequence);
     raiseView = minimumRaises.viewFor("Raiser");
-    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 500);
+    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 550);
     try {
         minimumRaises.submitAction("Raiser", Action::raise, 400, raiseView.eventSequence);
         assert(false && "a raise smaller than the previous full raise must be rejected");
     } catch (const CommandError& error) {
         assert(error.failure() == CommandFailure::illegalAction);
     }
-    minimumRaises.submitAction("Raiser", Action::raise, 500, raiseView.eventSequence);
+    minimumRaises.submitAction("Raiser", Action::raise, 550, raiseView.eventSequence);
     raiseView = minimumRaises.viewFor("Big");
-    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 700);
+    assert(raiseView.legalActions && raiseView.legalActions->minimumAmount == 800);
     try {
         minimumRaises.submitAction("Big", Action::raise, 600, raiseView.eventSequence);
         assert(false && "a re-raise must match the preceding raise amount");
