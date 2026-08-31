@@ -482,8 +482,8 @@ private:
         if (amount <= 0) return;
         const QRectF rect(center.x() - 34, center.y() - 14, 68, 28);
         painter.save();
-        painter.setPen(QPen(QColor("#6C5200"), 1));
-        painter.setBrush(QColor("#F5E400"));
+        painter.setPen(QPen(QColor("#2E7D32"), 1));
+        painter.setBrush(QColor("#B7E4C7"));
         painter.drawRoundedRect(rect, 12, 12);
         painter.setPen(QColor("#171717"));
         painter.setFont(QFont("Helvetica", 11, QFont::Bold));
