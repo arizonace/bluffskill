@@ -660,6 +660,14 @@ public:
         auto* connection = new QFrame(central);
         auto* connectionLayout = new QVBoxLayout(connection);
         connectionLayout->setContentsMargins(0, 0, 0, 0);
+        const auto readOnlyField = [connection](const QString& widestValue) {
+            auto* field = new QLineEdit(connection);
+            field->setReadOnly(true);
+            field->setFocusPolicy(Qt::NoFocus);
+            field->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            field->setFixedWidth(field->fontMetrics().horizontalAdvance(widestValue) + 18);
+            return field;
+        };
         auto* connectionRow = new QHBoxLayout;
         server_ = new QComboBox(connection); server_->addItem("Not connected"); server_->setEnabled(false);
         competition_ = new QComboBox(connection); competition_->addItem("Choose a server first"); competition_->setEnabled(false);
@@ -672,18 +680,38 @@ public:
         connectionRow->addSpacing(14);
         connectionRow->addWidget(new QLabel("Table", connection));
         connectionRow->addWidget(table_, 1);
+        pausePlayButton_ = new QPushButton(connection);
+        pausePlayButton_->setFixedWidth(38);
+        pausePlayButton_->setEnabled(false);
+        setPausePlayButtonMode(false);
+        connect(pausePlayButton_, &QPushButton::clicked, this, [this] { togglePause(); });
+        connectionRow->addSpacing(8);
+        connectionRow->addWidget(pausePlayButton_);
         connectionLayout->addLayout(connectionRow);
         auto* dealRow = new QHBoxLayout;
-        remainingPlayersCaption_ = new QLabel("Remaining Players", connection);
+        remainingPlayersCaption_ = new QLabel("Remaining Players:", connection);
         dealRow->addWidget(remainingPlayersCaption_);
-        remainingPlayers_ = new QLabel("—", connection);
-        remainingPlayers_->setMinimumWidth(42);
+        remainingPlayers_ = readOnlyField("Player-Name");
+        remainingPlayers_->setText("—");
         dealRow->addWidget(remainingPlayers_);
-        dealRow->addSpacing(30);
+        dealRow->addSpacing(20);
+        dealRow->addWidget(new QLabel("Blinds:", connection));
+        smallBlindAmount_ = readOnlyField("9,999,999");
+        smallBlindAmount_->setText("—");
+        dealRow->addWidget(smallBlindAmount_);
+        dealRow->addWidget(new QLabel("/", connection));
+        bigBlindAmount_ = readOnlyField("9,999,999");
+        bigBlindAmount_->setText("—");
+        dealRow->addWidget(bigBlindAmount_);
+        dealRow->addSpacing(20);
+        dealRow->addWidget(new QLabel("Rounds Played:", connection));
+        roundsPlayed_ = readOnlyField("9,999");
+        roundsPlayed_->setText("—");
+        dealRow->addWidget(roundsPlayed_);
+        dealRow->addSpacing(20);
         dealRow->addWidget(new QLabel("Next Deal In", connection));
-        nextDealIn_ = new QLabel("—", connection);
-        nextDealIn_->setFixedWidth(nextDealIn_->fontMetrics().horizontalAdvance("3,600 s"));
-        nextDealIn_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        nextDealIn_ = readOnlyField("3,600");
+        nextDealIn_->setText("—");
         dealRow->addWidget(nextDealIn_);
         dealRow->addSpacing(12);
         dealNowButton_ = new QPushButton("Deal Now", connection);
@@ -699,24 +727,20 @@ public:
         auto* actions = new QFrame(central);
         auto* actionLayout = new QVBoxLayout(actions);
         auto* actionInfoLayout = new QHBoxLayout;
-        actionStatus_ = new QLabel("No human player is attached.", actions);
-        actionInfoLayout->addWidget(actionStatus_);
         actionClockCaption_ = new QLabel("Action Clock:", actions);
-        actionClockValue_ = new QLabel("—", actions);
+        actionClockValue_ = new QLineEdit(actions);
+        actionClockValue_->setReadOnly(true);
+        actionClockValue_->setFocusPolicy(Qt::NoFocus);
         actionClockValue_->setFixedWidth(actionClockValue_->fontMetrics().horizontalAdvance("3600"));
         actionClockValue_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         actionClockCaption_->setVisible(false);
         actionClockValue_->setVisible(false);
         actionInfoLayout->addWidget(actionClockCaption_);
         actionInfoLayout->addWidget(actionClockValue_);
-        pausePlayButton_ = new QPushButton("Pause", actions);
-        pausePlayButton_->setEnabled(false);
-        connect(pausePlayButton_, &QPushButton::clicked, this, [this] { togglePause(); });
-        actionInfoLayout->addWidget(pausePlayButton_);
+        actionInfoLayout->addStretch(1);
+        actionLayout->addLayout(actionInfoLayout);
         wagerStatus_ = new QLabel("Current bet: 0 chips", actions);
         wagerStatus_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        actionInfoLayout->addWidget(wagerStatus_, 1);
-        actionLayout->addLayout(actionInfoLayout);
         auto* actionControlsLayout = new QHBoxLayout;
         for (const auto* action : {"Check", "Call", "Bet", "Raise", "Fold"}) {
             auto* button = new QPushButton(action, actions);
@@ -740,17 +764,9 @@ public:
         denominationLayout_->setContentsMargins(0, 0, 0, 0);
         denominationLayout_->setSpacing(6);
         wagerLayout->addWidget(denominationControls_);
+        wagerLayout->addWidget(wagerStatus_);
         wagerLayout->addStretch(1);
         actionLayout->addLayout(wagerLayout);
-        auto* blindsLayout = new QHBoxLayout;
-        blindsLayout->addWidget(new QLabel("Blinds", actions));
-        blindAmounts_ = new QLineEdit(actions);
-        blindAmounts_->setReadOnly(true);
-        blindAmounts_->setFixedWidth(110);
-        blindAmounts_->setText("—");
-        blindsLayout->addWidget(blindAmounts_);
-        blindsLayout->addStretch(1);
-        actionLayout->addLayout(blindsLayout);
         layout->addWidget(actions);
         setCentralWidget(central);
         auto* connectionMenu = menuBar()->addMenu("Connection");
@@ -1047,7 +1063,7 @@ private:
             if (attempt != connectionGeneration_ || requestGeneration != tableViewRequestGeneration_ || !connected_) return;
             if (!success) {
                 setActionControlsEnabled(false);
-                actionStatus_->setText("Could not retrieve the current table state.");
+                statusBar()->showMessage("Could not retrieve the current table state.");
                 return;
             }
             applyTableView(view);
@@ -1072,14 +1088,15 @@ private:
             }
         }
         tableComplete_ = view.value("street").toString() == "Showdown" && playersWithChips == 1;
-        remainingPlayersCaption_->setText(tableComplete_ ? "Table Winner" : "Remaining Players");
+        remainingPlayersCaption_->setText(tableComplete_ ? "Table Winner:" : "Remaining Players:");
         remainingPlayers_->setText(tableComplete_ ? tableWinner : QString::number(remaining));
         const auto legal = view.value("legalActions").toObject();
         setChipDenominations(view.value("chipDenominations").toArray());
         const auto currentBet = view.value("currentBet").toInteger();
         const auto callAmount = legal.value("callAmount").toInteger();
-        blindAmounts_->setText(QLocale().toString(view.value("smallBlind").toInteger())
-            + "/" + QLocale().toString(view.value("bigBlind").toInteger()));
+        smallBlindAmount_->setText(QLocale().toString(view.value("smallBlind").toInteger()));
+        bigBlindAmount_->setText(QLocale().toString(view.value("bigBlind").toInteger()));
+        roundsPlayed_->setText(QLocale().toString(view.value("roundsPlayed").toInteger()));
         bool anyAction = false;
         for (auto* button : actionButtons_) {
             const auto actionName = button->property("actionName").toString();
@@ -1113,16 +1130,11 @@ private:
             stopTurnCountdown();
             if (tableComplete_) {
                 stopNextDealCountdown();
-                actionStatus_->setText("Table winner: " + tableWinner + ". The game is complete. Choose Game → Restart Game to play again.");
+                statusBar()->showMessage("Table winner: " + tableWinner + ". The game is complete. Choose Game → Restart Game to play again.");
                 return;
             }
-            const auto hadShowdown = view.value("showdownOccurred").toBool();
             const auto dealerDelayMilliseconds = humanPlayerBusted(view)
                 ? settings_.uninterruptedDealerDelayMilliseconds : settings_.dealClockSeconds * 1'000;
-            const auto delayText = durationText(dealerDelayMilliseconds);
-            actionStatus_->setText(hadShowdown
-                ? "Showdown complete. The revealed cards and each winner's result are on the table. The next hand starts in " + delayText + ", or click the Dealer button now."
-                : "The hand ended by a fold. The winner and result are on the table. The next hand starts in " + delayText + ", or click the Dealer button now.");
             if (lastShowdownSequence_ != tableSequence_) {
                 lastShowdownSequence_ = tableSequence_;
                 beginNextDealCountdown(dealerDelayMilliseconds);
@@ -1130,20 +1142,24 @@ private:
         } else {
             stopNextDealCountdown();
             lastShowdownSequence_ = -1;
-            if (!humanPlayer_) actionStatus_->setText("Choose a local player through New Game to view private cards and act.");
+            if (!humanPlayer_) statusBar()->showMessage("Choose a local player through New Game to view private cards and act.");
             else if (anyAction) {
                 beginTurnCountdown(legal);
-                actionStatus_->clear();
+                statusBar()->clearMessage();
                 setActionClockVisible(true);
             } else {
                 stopTurnCountdown();
-                actionStatus_->setText("Waiting for " + view.value("actingSeat").toVariant().toString() + " to act.");
+                statusBar()->showMessage("Waiting for " + view.value("actingSeat").toVariant().toString() + " to act.");
             }
         }
     }
 
     [[nodiscard]] static QString durationText(int milliseconds) {
         return QString::number(std::max(0, (milliseconds + 999) / 1'000)) + " s";
+    }
+
+    [[nodiscard]] static QString countdownValue(int milliseconds) {
+        return QString::number(std::max(0, (milliseconds + 999) / 1'000));
     }
 
     [[nodiscard]] bool humanPlayerBusted(const QJsonObject& view) const {
@@ -1165,6 +1181,18 @@ private:
             automatedActionQueue_.clear();
             automatedActionTimer_.stop();
             pokerTable_->clearActionBoxes();
+        }
+        // The server has already completed the hand when it projects Showdown.
+        // Reference-player actions can arrive in that response as one batch;
+        // they are historical, not pending turns to present.  Do not let their
+        // presentation animation postpone the dealer countdown or impersonate
+        // the authoritative acting indicator after the hand is settled.
+        if (view.value("street").toString() == "Showdown") {
+            displayedActionHistoryCount_ = history.size();
+            automatedActionQueue_.clear();
+            automatedActionTimer_.stop();
+            pokerTable_->setPresentedActingSeat(0);
+            return false;
         }
         for (qsizetype index = displayedActionHistoryCount_; index < history.size(); ++index) {
             const auto action = history.at(index).toObject();
@@ -1197,7 +1225,8 @@ private:
         const auto action = automatedActionQueue_.takeFirst();
         pokerTable_->setPresentedActingSeat(action.seat);
         pokerTable_->showLastAction(action.seat, action.action, action.amount);
-        actionStatus_->setText(action.player + " " + action.action.toLower() + (action.amount > 0 ? " " + QLocale().toString(action.amount) : "") + ".");
+        statusBar()->showMessage(action.player + " " + action.action.toLower()
+            + (action.amount > 0 ? " " + QLocale().toString(action.amount) : "") + ".");
         automatedActionTimer_.start(settings_.automatedPlayerDelayMilliseconds);
     }
 
@@ -1211,6 +1240,12 @@ private:
         actionClockCaption_->setVisible(visible);
         actionClockValue_->setVisible(visible);
         if (visible) actionClockValue_->setText(QString::number(turnSeconds_));
+    }
+
+    void setPausePlayButtonMode(bool paused) {
+        pausePlayButton_->setText(QString(paused ? QChar(0x25B6) : QChar(0x23F8)));
+        pausePlayButton_->setToolTip(paused ? "Resume game" : "Pause game");
+        pausePlayButton_->setAccessibleName(paused ? "Resume game" : "Pause game");
     }
 
     [[nodiscard]] qint64 wagerAmount() const {
@@ -1283,10 +1318,10 @@ private:
     void beginNextDealCountdown(int delayMilliseconds) {
         if (pauseReason_ == PauseReason::deal) { paused_ = false; pauseReason_ = PauseReason::none; }
         nextDealMilliseconds_ = delayMilliseconds;
-        nextDealIn_->setText(durationText(nextDealMilliseconds_));
+        nextDealIn_->setText(countdownValue(nextDealMilliseconds_));
         dealNowButton_->setEnabled(true);
         pausePlayButton_->setEnabled(true);
-        pausePlayButton_->setText("Pause");
+        setPausePlayButtonMode(false);
         nextDealCountdownTimer_.start(50);
         nextHandTimer_.start(nextDealMilliseconds_);
     }
@@ -1307,7 +1342,7 @@ private:
             return;
         }
         nextDealMilliseconds_ = std::max(0, nextDealMilliseconds_ - 50);
-        nextDealIn_->setText(durationText(nextDealMilliseconds_));
+        nextDealIn_->setText(countdownValue(nextDealMilliseconds_));
     }
 
     void beginTurnCountdown(const QJsonObject& legal) {
@@ -1326,7 +1361,7 @@ private:
         turnCountdownTimer_.start(1'000);
         setActionClockVisible(true);
         pausePlayButton_->setEnabled(true);
-        pausePlayButton_->setText("Pause");
+        setPausePlayButtonMode(false);
     }
 
     void stopTurnCountdown() {
@@ -1350,25 +1385,25 @@ private:
                 nextHandTimer_.stop();
                 nextDealCountdownTimer_.stop();
                 pauseReason_ = PauseReason::deal;
-                actionStatus_->setText("Game paused. Next deal in " + durationText(nextDealMilliseconds_) + ".");
+                statusBar()->showMessage("Game paused. Next deal in " + durationText(nextDealMilliseconds_) + ".");
             } else {
                 return;
             }
             paused_ = true;
-            pausePlayButton_->setText("Play");
+            setPausePlayButtonMode(true);
             return;
         }
         paused_ = false;
         if (pauseReason_ == PauseReason::turn) {
             turnCountdownTimer_.start(1'000);
-            actionStatus_->clear();
+            statusBar()->clearMessage();
             setActionClockVisible(true);
         } else if (pauseReason_ == PauseReason::deal) {
             nextDealCountdownTimer_.start(50);
             nextHandTimer_.start(nextDealMilliseconds_);
         }
         pauseReason_ = PauseReason::none;
-        pausePlayButton_->setText("Pause");
+        setPausePlayButtonMode(false);
     }
 
     void advanceTurnCountdown() {
@@ -1403,7 +1438,7 @@ private:
             release(reply);
             if (attempt != connectionGeneration_ || !connected_) return;
             if (!success) {
-                actionStatus_->setText(response.value("error").toString("The server could not begin the next hand."));
+                statusBar()->showMessage(response.value("error").toString("The server could not begin the next hand."));
                 refreshTableView();
                 return;
             }
@@ -1532,10 +1567,10 @@ private:
             humanPlayer_ = std::move(pendingHumanPlayer_);
             pokerTable_->setLocalPlayerName(humanPlayer_->apiPlayerName());
             setActionControlsEnabled(false);
-            actionStatus_->setText("You are " + humanPlayer_->apiPlayerName() + ". Seating remaining reference players…");
+            statusBar()->showMessage("You are " + humanPlayer_->apiPlayerName() + ". Seating remaining reference players…");
             addReferencePlayers(competitionName, attempt, defaultTableSeats - humanSeat, [this, competitionName] {
                 newGameAction_->setEnabled(true);
-                actionStatus_->setText("You are " + humanPlayer_->apiPlayerName() + ". Retrieving your private table view…");
+                statusBar()->showMessage("You are " + humanPlayer_->apiPlayerName() + ". Retrieving your private table view…");
                 statusBar()->showMessage("Created " + competitionName + " with nine reference players and " + humanPlayer_->apiPlayerName() + ".");
                 refreshCompetitions(competitionName);
             });
@@ -1557,7 +1592,7 @@ private:
             ? wagerAmount() : 0;
         setActionControlsEnabled(false);
         setWagerControlsEnabled(false);
-        actionStatus_->setText("Submitting " + bluffskill::client::HumanPlayer::displayName(humanAction) + "…");
+        statusBar()->showMessage("Submitting " + bluffskill::client::HumanPlayer::displayName(humanAction) + "…");
         const auto attempt = connectionGeneration_;
         auto* reply = track(humanPlayer_->submitAction(network_, serverUrl_, competition_->currentText(), table_->currentText(), humanAction,
             amount, tableSequence_));
@@ -1569,7 +1604,7 @@ private:
             if (attempt != connectionGeneration_ || !connected_) return;
             if (!success) {
                 const auto detail = response.value("error").toString("The server rejected the action.");
-                actionStatus_->setText(detail);
+                statusBar()->showMessage(detail);
                 statusBar()->showMessage("Action was not accepted; refreshing the table.");
                 refreshTableView();
                 return;
@@ -1601,14 +1636,16 @@ private:
         automatedActionTimer_.stop();
         pokerTable_->clearActionBoxes();
         tableComplete_ = false;
-        remainingPlayersCaption_->setText("Remaining Players");
+        remainingPlayersCaption_->setText("Remaining Players:");
         remainingPlayers_->setText("—");
         nextHandRequestInFlight_ = false;
         stopNextDealCountdown();
         stopTurnCountdown();
-        actionStatus_->setText("No human player is attached.");
+        statusBar()->showMessage("No human player is attached.");
         wagerStatus_->setText("Current bet: 0 chips");
-        blindAmounts_->setText("—");
+        smallBlindAmount_->setText("—");
+        bigBlindAmount_->setText("—");
+        roundsPlayed_->setText("—");
     }
 
 private:
@@ -1652,18 +1689,19 @@ private:
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};
-    QLabel* remainingPlayers_{};
+    QLineEdit* remainingPlayers_{};
     QLabel* remainingPlayersCaption_{};
-    QLabel* nextDealIn_{};
+    QLineEdit* smallBlindAmount_{};
+    QLineEdit* bigBlindAmount_{};
+    QLineEdit* roundsPlayed_{};
+    QLineEdit* nextDealIn_{};
     QPushButton* dealNowButton_{};
     PokerTable* pokerTable_{};
-    QLabel* actionStatus_{};
     QLabel* actionClockCaption_{};
-    QLabel* actionClockValue_{};
+    QLineEdit* actionClockValue_{};
     QLabel* wagerStatus_{};
     QPushButton* pausePlayButton_{};
     QLineEdit* amountEdit_{};
-    QLineEdit* blindAmounts_{};
     QWidget* denominationControls_{};
     QHBoxLayout* denominationLayout_{};
     QVector<QToolButton*> denominationUp_;

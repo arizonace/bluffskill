@@ -354,6 +354,7 @@ void Table::startHand() {
     if (const auto* actor = nextPendingSeatAfter(big->number)) actingSeat_ = actor->number;
     else advanceStreet();
     ++handsAtCurrentBlindLevel_;
+    ++roundsPlayed_;
     blindClockStarted_ = true;
     ++eventSequence_;
 }
@@ -392,6 +393,7 @@ void Table::restartGame() {
     showdownOccurred_ = false;
     blindLevel_ = 0;
     handsAtCurrentBlindLevel_ = 0;
+    roundsPlayed_ = 0;
     blindClockStarted_ = false;
     blindLevelStartedAt_ = std::chrono::steady_clock::now();
     deck_.reset();
@@ -477,7 +479,7 @@ std::vector<PotView> Table::pots() const {
 TableView Table::viewFor(std::string_view viewerName) const {
     TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .currentBet = currentBet_,
         .smallBlind = smallBlindAmount(), .bigBlind = bigBlindAmount(), .chipDenominations = chipDenominations_,
-        .blindLevel = blindLevel_, .dealerSeat = dealerSeat_,
+        .blindLevel = blindLevel_, .roundsPlayed = roundsPlayed_, .dealerSeat = dealerSeat_,
         .smallBlindSeat = smallBlindSeat_, .bigBlindSeat = bigBlindSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_,
         .pots = pots(), .payouts = payouts_, .showdownOccurred = showdownOccurred_, .actionHistory = history_};
     const auto* viewer = seatFor(viewerName);

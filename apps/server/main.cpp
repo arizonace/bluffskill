@@ -242,7 +242,10 @@ private:
                     && view.eventSequence > cursor.sequence + static_cast<std::uint64_t>(appendedActions);
                 const auto newDeal = !history.isEmpty() && (cursor.history.isEmpty() || !continues || sequenceIndicatesNewDeal);
                 if (newDeal) {
-                    appendActionLogRow({}, "Deal", "Deal");
+                    const auto dealer = std::ranges::find_if(view.players, [seat = view.dealerSeat](const auto& player) {
+                        return seat && player.seat == *seat;
+                    });
+                    appendActionLogRow(dealer == view.players.end() ? QString{} : QString::fromStdString(dealer->name), "Deal", "Deal");
                     cursor.history.clear();
                 }
                 for (qsizetype index = cursor.history.size(); index < view.actionHistory.size(); ++index) {
@@ -346,7 +349,7 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
         {"currentBet", static_cast<qint64>(table.currentBet)},
         {"smallBlind", static_cast<qint64>(table.smallBlind)}, {"bigBlind", static_cast<qint64>(table.bigBlind)},
         {"chipDenominations", chipDenominations},
-        {"blindLevel", static_cast<qint64>(table.blindLevel)},
+        {"blindLevel", static_cast<qint64>(table.blindLevel)}, {"roundsPlayed", static_cast<qint64>(table.roundsPlayed)},
         {"dealerSeat", table.dealerSeat ? static_cast<int>(*table.dealerSeat) : 0},
         {"smallBlindSeat", table.smallBlindSeat ? static_cast<int>(*table.smallBlindSeat) : 0},
         {"bigBlindSeat", table.bigBlindSeat ? static_cast<int>(*table.bigBlindSeat) : 0},

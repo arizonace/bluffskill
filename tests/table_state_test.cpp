@@ -23,6 +23,7 @@ int main() {
     assert(publicView.currentBet == 50);
     assert(publicView.smallBlind == 25);
     assert(publicView.bigBlind == 50);
+    assert(publicView.roundsPlayed == 1);
     assert(publicView.actingSeat == 1);
     assert(publicView.smallBlindSeat == 2);
     assert(publicView.bigBlindSeat == 3);
@@ -137,12 +138,14 @@ int main() {
     rotation.startNextHand();
     const auto nextHand = rotation.viewFor();
     assert(nextHand.street == Street::preflop);
+    assert(nextHand.roundsPlayed == 2);
     assert(nextHand.dealerSeat == 2);
     assert(nextHand.smallBlindSeat == 3);
 
     rotation.restartGame();
     const auto restarted = rotation.viewFor();
     assert(restarted.street == Street::preflop);
+    assert(restarted.roundsPlayed == 1);
     assert(restarted.dealerSeat == 1);
     assert(restarted.players[0].stack == 500);
     assert(restarted.players[1].stack == 475);
