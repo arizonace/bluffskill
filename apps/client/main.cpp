@@ -333,7 +333,7 @@ protected:
             const auto winningsDistance = 45.0 + std::abs(actionDirection.x()) * 35.0 + std::abs(actionDirection.y()) * 20.0;
             drawActionBox(painter, point + actionDirection * actionDistance, playerLastActions_[i]);
             drawWinningsBox(painter, point - actionDirection * winningsDistance, playerPotWinnings_[i], playerNetWinnings_[i]);
-            if (showdownOccurred_ && playerNames_[i] != localPlayerName_ && !playerFolded_[i] && !playerHoleCards_[i].isEmpty()) {
+            if (showdownOccurred_ && (!playerFolded_[i] || playerNames_[i] == localPlayerName_) && !playerHoleCards_[i].isEmpty()) {
                 drawPlayerCards(painter, playerHoleCards_[i], playerShowdownDescriptions_[i], point, inward,
                     isSouthSeat(i), 38, 52);
             }
@@ -790,10 +790,27 @@ public:
         actionClockValue_->setVisible(false);
         actionInfoLayout->addWidget(actionClockCaption_);
         actionInfoLayout->addWidget(actionClockValue_);
+        callAmountCaption_ = new QLabel("Amount to call:", actions);
+        callAmountValue_ = new QLineEdit(actions);
+        callAmountValue_->setReadOnly(true);
+        callAmountValue_->setFocusPolicy(Qt::NoFocus);
+        callAmountValue_->setFixedWidth(callAmountValue_->fontMetrics().horizontalAdvance("9,999,999") + 18);
+        callAmountValue_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        minimumWagerCaption_ = new QLabel("Minimum Raise/Bet:", actions);
+        minimumWagerValue_ = new QLineEdit(actions);
+        minimumWagerValue_->setReadOnly(true);
+        minimumWagerValue_->setFocusPolicy(Qt::NoFocus);
+        minimumWagerValue_->setFixedWidth(minimumWagerValue_->fontMetrics().horizontalAdvance("9,999,999") + 18);
+        minimumWagerValue_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        setActionDetailsVisible(false);
+        actionInfoLayout->addSpacing(18);
+        actionInfoLayout->addWidget(callAmountCaption_);
+        actionInfoLayout->addWidget(callAmountValue_);
+        actionInfoLayout->addSpacing(12);
+        actionInfoLayout->addWidget(minimumWagerCaption_);
+        actionInfoLayout->addWidget(minimumWagerValue_);
         actionInfoLayout->addStretch(1);
         actionLayout->addLayout(actionInfoLayout);
-        wagerStatus_ = new QLabel("Current bet: 0 chips", actions);
-        wagerStatus_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         auto* actionControlsLayout = new QHBoxLayout;
         for (const auto* action : {"Check", "Call", "Bet", "Raise", "Fold"}) {
             auto* button = new QPushButton(action, actions);
@@ -805,19 +822,30 @@ public:
         }
         actionLayout->addLayout(actionControlsLayout);
         auto* wagerLayout = new QHBoxLayout;
-        wagerLayout->addWidget(new QLabel("Total commitment", actions));
+        wagerLayout->addWidget(new QLabel("Bet Amount", actions));
         amountEdit_ = new QLineEdit(actions);
         amountEdit_->setValidator(new QIntValidator(0, 1000000000, amountEdit_));
         amountEdit_->setEnabled(false);
         amountEdit_->setMinimumWidth(115);
         connect(amountEdit_, &QLineEdit::editingFinished, this, [this] { normalizeWagerAmount(); });
+        connect(amountEdit_, &QLineEdit::textChanged, this, [this] { updateWagerSummary(wagerRaiseAvailable_, wagerCurrentBet_); });
         wagerLayout->addWidget(amountEdit_);
         denominationControls_ = new QWidget(actions);
         denominationLayout_ = new QHBoxLayout(denominationControls_);
         denominationLayout_->setContentsMargins(0, 0, 0, 0);
         denominationLayout_->setSpacing(6);
         wagerLayout->addWidget(denominationControls_);
-        wagerLayout->addWidget(wagerStatus_);
+        wagerLayout->addSpacing(16);
+        wagerLayout->addWidget(new QLabel("Total commitment", actions));
+        totalCommitment_ = new QLineEdit(actions);
+        totalCommitment_->setReadOnly(true);
+        totalCommitment_->setFocusPolicy(Qt::NoFocus);
+        totalCommitment_->setFixedWidth(totalCommitment_->fontMetrics().horizontalAdvance("9,999,999") + 18);
+        totalCommitment_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        totalCommitment_->setText("—");
+        wagerLayout->addWidget(totalCommitment_);
+        raiseSummary_ = new QLabel(actions);
+        wagerLayout->addWidget(raiseSummary_);
         wagerLayout->addStretch(1);
         localHoleCardsWidget_ = new LocalHoleCardsWidget(actions);
         wagerLayout->addWidget(localHoleCardsWidget_);
@@ -1128,7 +1156,7 @@ private:
     void applyTableView(const QJsonObject& view) {
         const auto previousStreet = lastStreet_;
         pokerTable_->setTableView(view);
-        localHoleCardsWidget_->setCards(pokerTable_->localHoleCards(), pokerTable_->localShowdownDescription());
+        localHoleCardsWidget_->setCards(view.value("street").toString() == "Showdown" ? QStringList{} : pokerTable_->localHoleCards());
         tableSequence_ = view.value("sequence").toInteger();
         lastStreet_ = view.value("street").toString();
         const auto presentingAutomatedActions = queueNewActionBoxes(view, previousStreet);
@@ -1149,7 +1177,18 @@ private:
         const auto legal = view.value("legalActions").toObject();
         setChipDenominations(view.value("chipDenominations").toArray());
         const auto currentBet = view.value("currentBet").toInteger();
+        wagerCurrentBet_ = currentBet;
         const auto callAmount = legal.value("callAmount").toInteger();
+        wagerExistingCommitment_ = 0;
+        if (humanPlayer_) {
+            for (const auto& item : view.value("players").toArray()) {
+                const auto player = item.toObject();
+                if (player.value("name").toString() == humanPlayer_->apiPlayerName()) {
+                    wagerExistingCommitment_ = player.value("roundCommitted").toInteger();
+                    break;
+                }
+            }
+        }
         smallBlindAmount_->setText(QLocale().toString(view.value("smallBlind").toInteger()));
         bigBlindAmount_->setText(QLocale().toString(view.value("bigBlind").toInteger()));
         roundsPlayed_->setText(QLocale().toString(view.value("roundsPlayed").toInteger()));
@@ -1165,16 +1204,15 @@ private:
         const auto minimum = legal.value("minimumAmount").toInteger();
         const auto maximum = legal.value("maximumAmount").toInteger();
         const auto canSetAmount = humanPlayer_ && (legal.value("bet").toBool() || legal.value("raise").toBool()) && maximum >= minimum;
-        wagerMinimum_ = minimum;
-        wagerMaximum_ = maximum;
+        wagerMinimum_ = std::max<qint64>(0, minimum - wagerExistingCommitment_);
+        wagerMaximum_ = std::max<qint64>(0, maximum - wagerExistingCommitment_);
         setWagerControlsEnabled(canSetAmount);
         if (canSetAmount) {
             if (!amountEdit_->hasFocus()) setWagerAmount(wagerMinimum_);
         } else {
             amountEdit_->clear();
         }
-        wagerStatus_->setText("Current bet: " + QLocale().toString(currentBet) + " chips"
-            + (humanPlayer_ && callAmount > 0 ? " · You need " + QLocale().toString(callAmount) + " to call" : ""));
+        updateWagerSummary(legal.value("raise").toBool() && canSetAmount, currentBet);
         if (presentingAutomatedActions) {
             stopTurnCountdown();
             setActionControlsEnabled(false);
@@ -1200,6 +1238,7 @@ private:
             lastShowdownSequence_ = -1;
             if (!humanPlayer_) statusBar()->showMessage("Choose a local player through New Game to view private cards and act.");
             else if (anyAction) {
+                setActionDetails(callAmount, canSetAmount ? wagerMinimum_ : 0, canSetAmount);
                 beginTurnCountdown(legal);
                 statusBar()->clearMessage();
                 setActionClockVisible(true);
@@ -1298,6 +1337,19 @@ private:
         if (visible) actionClockValue_->setText(QString::number(turnSeconds_));
     }
 
+    void setActionDetailsVisible(bool visible) {
+        callAmountCaption_->setVisible(visible);
+        callAmountValue_->setVisible(visible);
+        minimumWagerCaption_->setVisible(visible);
+        minimumWagerValue_->setVisible(visible);
+    }
+
+    void setActionDetails(qint64 callAmount, qint64 minimumWager, bool canRaiseOrBet) {
+        callAmountValue_->setText(QLocale().toString(callAmount));
+        minimumWagerValue_->setText(canRaiseOrBet ? QLocale().toString(minimumWager) : "—");
+        setActionDetailsVisible(true);
+    }
+
     void setPausePlayButtonMode(bool paused) {
         pausePlayButton_->setText(QString(paused ? QChar(0x25B6) : QChar(0x23F8)));
         pausePlayButton_->setToolTip(paused ? "Resume game" : "Pause game");
@@ -1313,6 +1365,25 @@ private:
     void setWagerAmount(qint64 amount) {
         const auto normalized = normalizedWagerAmount(amount);
         amountEdit_->setText(QString::number(normalized));
+        updateWagerSummary(wagerRaiseAvailable_, wagerCurrentBet_);
+    }
+
+    void updateWagerSummary(bool raiseAvailable, qint64 currentBet) {
+        wagerRaiseAvailable_ = raiseAvailable;
+        if (!humanPlayer_) {
+            totalCommitment_->setText("—");
+            raiseSummary_->clear();
+            return;
+        }
+        const auto betAmount = amountEdit_->isEnabled() ? wagerAmount() : 0;
+        const auto totalCommitment = wagerExistingCommitment_ + betAmount;
+        totalCommitment_->setText(QLocale().toString(totalCommitment));
+        if (raiseAvailable) {
+            const auto raiseBy = std::max<qint64>(0, totalCommitment - currentBet);
+            raiseSummary_->setText("Raise by " + QLocale().toString(raiseBy) + " / Raise to " + QLocale().toString(totalCommitment));
+        } else {
+            raiseSummary_->clear();
+        }
     }
 
     void normalizeWagerAmount() {
@@ -1427,6 +1498,7 @@ private:
         turnCanCheck_ = false;
         turnCanFold_ = false;
         setActionClockVisible(false);
+        setActionDetailsVisible(false);
         if (pauseReason_ == PauseReason::turn) { paused_ = false; pauseReason_ = PauseReason::none; }
         if (nextDealMilliseconds_ == 0) pausePlayButton_->setEnabled(false);
     }
@@ -1645,7 +1717,7 @@ private:
         humanPlayer_->selectAction(humanAction);
         if (competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
         const auto amount = humanAction == bluffskill::client::HumanAction::bet || humanAction == bluffskill::client::HumanAction::raise
-            ? wagerAmount() : 0;
+            ? wagerExistingCommitment_ + wagerAmount() : 0;
         setActionControlsEnabled(false);
         setWagerControlsEnabled(false);
         statusBar()->showMessage("Submitting " + bluffskill::client::HumanPlayer::displayName(humanAction) + "…");
@@ -1699,7 +1771,8 @@ private:
         stopNextDealCountdown();
         stopTurnCountdown();
         statusBar()->showMessage("No human player is attached.");
-        wagerStatus_->setText("Current bet: 0 chips");
+        totalCommitment_->setText("—");
+        raiseSummary_->clear();
         smallBlindAmount_->setText("—");
         bigBlindAmount_->setText("—");
         roundsPlayed_->setText("—");
@@ -1757,9 +1830,14 @@ private:
     LocalHoleCardsWidget* localHoleCardsWidget_{};
     QLabel* actionClockCaption_{};
     QLineEdit* actionClockValue_{};
-    QLabel* wagerStatus_{};
+    QLabel* callAmountCaption_{};
+    QLineEdit* callAmountValue_{};
+    QLabel* minimumWagerCaption_{};
+    QLineEdit* minimumWagerValue_{};
     QPushButton* pausePlayButton_{};
     QLineEdit* amountEdit_{};
+    QLineEdit* totalCommitment_{};
+    QLabel* raiseSummary_{};
     QWidget* denominationControls_{};
     QHBoxLayout* denominationLayout_{};
     QVector<QToolButton*> denominationUp_;
@@ -1767,6 +1845,9 @@ private:
     QVector<qint64> chipDenominations_;
     qint64 wagerMinimum_{};
     qint64 wagerMaximum_{};
+    qint64 wagerExistingCommitment_{};
+    qint64 wagerCurrentBet_{};
+    bool wagerRaiseAvailable_{};
     std::vector<QPushButton*> actionButtons_;
     QAction* disconnectAction_{};
     QAction* newGameAction_{};
