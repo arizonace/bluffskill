@@ -22,6 +22,7 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QPlainTextEdit>
+#include <QSet>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QTcpServer>
@@ -210,6 +211,8 @@ private:
     struct ActionLogCursor {
         QStringList history;
         std::uint64_t sequence{0};
+        QHash<int, qint64> handStartingStacks;
+        QSet<int> loggedBustedSeats;
     };
 
     void appendActionLogRow(const QString& player, const QString& round, const QString& action, const QString& value = {}) {
@@ -247,12 +250,28 @@ private:
                     });
                     appendActionLogRow(dealer == view.players.end() ? QString{} : QString::fromStdString(dealer->name), "Deal", "Deal");
                     cursor.history.clear();
+                    cursor.handStartingStacks.clear();
+                    cursor.loggedBustedSeats.clear();
+                    for (const auto& player : view.players) {
+                        if (player.stack > 0 || player.committed > 0) {
+                            cursor.handStartingStacks.insert(static_cast<int>(player.seat), static_cast<qint64>(player.stack + player.committed));
+                        }
+                    }
                 }
                 for (qsizetype index = cursor.history.size(); index < view.actionHistory.size(); ++index) {
                     const auto& action = view.actionHistory[static_cast<std::size_t>(index)];
                     appendActionLogRow(QString::fromStdString(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
                         QString::fromUtf8(bluffskill::poker::toString(action.action)),
                         action.amount == 0 ? QString{} : QLocale().toString(action.amount));
+                }
+                if (view.street == bluffskill::poker::Street::showdown) {
+                    for (const auto& player : view.players) {
+                        const auto seat = static_cast<int>(player.seat);
+                        if (player.stack == 0 && cursor.handStartingStacks.value(seat) > 0 && !cursor.loggedBustedSeats.contains(seat)) {
+                            appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Busted Out");
+                            cursor.loggedBustedSeats.insert(seat);
+                        }
+                    }
                 }
                 cursor.history = std::move(history);
                 cursor.sequence = view.eventSequence;
@@ -311,7 +330,8 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
         players.append(QJsonObject{{"name", QString::fromStdString(player.name)},
             {"kind", QString::fromUtf8(bluffskill::poker::toString(player.kind))},
             {"seat", static_cast<int>(player.seat)}, {"stack", static_cast<qint64>(player.stack)},
-            {"committed", static_cast<qint64>(player.committed)}, {"folded", player.folded},
+            {"committed", static_cast<qint64>(player.committed)}, {"roundCommitted", static_cast<qint64>(player.roundCommitted)},
+            {"folded", player.folded},
             {"dealer", player.dealer}, {"acting", player.acting}, {"holeCards", holeCards},
             {"showdownDescription", QString::fromStdString(player.showdownDescription)}});
     }

@@ -52,6 +52,39 @@ namespace {
 
 constexpr int defaultTableSeats = 10;
 
+struct CompactCard {
+    QString rank;
+    QString suit;
+    QColor color;
+};
+
+[[nodiscard]] CompactCard compactCard(const QString& description) {
+    const auto pieces = description.split(' ', Qt::SkipEmptyParts);
+    const auto rank = pieces.value(0, "?");
+    const auto suitName = pieces.value(2).toLower();
+    if (suitName == "clubs") return {rank, "♣", QColor("#172018")};
+    if (suitName == "diamonds") return {rank, "♦", QColor("#C82B30")};
+    if (suitName == "hearts") return {rank, "♥", QColor("#C82B30")};
+    if (suitName == "spades") return {rank, "♠", QColor("#172018")};
+    return {rank, "?", QColor("#172018")};
+}
+
+void drawCardFace(QPainter& painter, const QRectF& cardRect, const QString& description) {
+    const auto card = compactCard(description);
+    painter.save();
+    painter.setPen(QPen(QColor("#C8A55B"), 2));
+    painter.setBrush(QColor("#FFF9EA"));
+    painter.drawRoundedRect(cardRect, 7, 7);
+    painter.setPen(card.color);
+    const auto rankSize = std::max(9, static_cast<int>(cardRect.height() * 0.22));
+    const auto suitSize = std::max(16, static_cast<int>(cardRect.height() * 0.46));
+    painter.setFont(QFont("Helvetica", rankSize, QFont::Bold));
+    painter.drawText(cardRect.adjusted(4, 3, -3, -3), Qt::AlignLeft | Qt::AlignTop, card.rank);
+    painter.setFont(QFont("Helvetica", suitSize, QFont::DemiBold));
+    painter.drawText(cardRect.adjusted(2, cardRect.height() * 0.13, -2, 0), Qt::AlignCenter, card.suit);
+    painter.restore();
+}
+
 class PokerTable final : public QWidget {
 public:
     explicit PokerTable(QWidget* parent = nullptr) : QWidget(parent) {
@@ -64,6 +97,7 @@ public:
         playerNames_.fill({});
         playerStacks_.fill(0);
         playerCommitted_.fill(0);
+        playerRoundCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
         playerFolded_.fill(false);
@@ -90,6 +124,7 @@ public:
         playerNames_.fill({});
         playerStacks_.fill(0);
         playerCommitted_.fill(0);
+        playerRoundCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
         playerFolded_.fill(false);
@@ -115,6 +150,7 @@ public:
         playerNames_.fill({});
         playerStacks_.fill(0);
         playerCommitted_.fill(0);
+        playerRoundCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
         playerFolded_.fill(false);
@@ -133,6 +169,7 @@ public:
                 playerNames_[index] = player.value("name").toString();
                 playerStacks_[index] = player.value("stack").toInteger();
                 playerCommitted_[index] = player.value("committed").toInteger();
+                playerRoundCommitted_[index] = player.value("roundCommitted").toInteger();
                 playerActing_[index] = player.value("acting").toBool();
                 playerDealer_[index] = player.value("dealer").toBool();
                 playerFolded_[index] = player.value("folded").toBool();
@@ -140,10 +177,13 @@ public:
                 playerShowdownDescriptions_[index] = player.value("showdownDescription").toString();
             }
         }
+        street_ = table.value("street").toString();
         pot_ = 0;
         for (const auto& item : table.value("pots").toArray()) pot_ += item.toObject().value("amount").toInteger();
+        if (street_ != "Showdown") {
+            for (const auto wager : playerRoundCommitted_) pot_ -= wager;
+        }
         currentBet_ = table.value("currentBet").toInteger();
-        street_ = table.value("street").toString();
         showdownOccurred_ = table.value("showdownOccurred").toBool();
         const auto smallBlindSeat = table.value("smallBlindSeat").toInt();
         const auto bigBlindSeat = table.value("bigBlindSeat").toInt();
@@ -182,6 +222,15 @@ public:
         localPlayerName_ = std::move(name);
         localHoleCards_.clear();
         update();
+    }
+
+    [[nodiscard]] QStringList localHoleCards() const { return localHoleCards_; }
+
+    [[nodiscard]] QString localShowdownDescription() const {
+        if (street_ != "Showdown") return {};
+        const auto local = std::ranges::find(playerNames_, localPlayerName_);
+        if (local == playerNames_.end()) return {};
+        return playerShowdownDescriptions_[static_cast<std::size_t>(std::distance(playerNames_.begin(), local))];
     }
 
     void setDealerAdvanceHandler(std::function<void()> handler) { dealerAdvanceHandler_ = std::move(handler); }
@@ -226,9 +275,6 @@ protected:
         constexpr std::array<QPointF, defaultTableSeats> actionDirections{{
             {-1, 0}, {-1, 0}, {-1, 0}, {0, -1}, {0, -1}, {1, 0}, {1, 0}, {1, 0}, {0, 1}, {0, 1},
         }};
-        QPointF localPoint;
-        bool hasLocalSeat = false;
-        std::size_t localSeatIndex = 0;
         painter.setFont(QFont("Helvetica", 12));
         for (std::size_t i = 0; i < seats.size(); ++i) {
             const auto point = seats[i];
@@ -236,11 +282,6 @@ protected:
                 && (street_ == "Showdown" || playerCommitted_[i] == 0);
             painter.setBrush(busted ? QColor("#454545") : QColor("#162D24"));
             const auto localPlayer = !localPlayerName_.isEmpty() && playerNames_[i] == localPlayerName_;
-            if (localPlayer) {
-                localPoint = point;
-                hasLocalSeat = true;
-                localSeatIndex = i;
-            }
             painter.setPen(QPen(localPlayer ? QColor("#F6D365") : Qt::white, localPlayer ? 3 : 1));
             painter.drawEllipse(point, playerRadius, playerRadius);
             const auto acting = presentedActingSeat_ == 0 ? playerActing_[i] : presentedActingSeat_ == i + 1;
@@ -284,21 +325,18 @@ protected:
             } else if (blind != RoleButton::none) {
                 drawRoleButton(painter, buttonArea, blind);
             }
+            if (street_ != "Showdown") {
+                drawPendingBet(painter, buttonArea + inward * (buttonRadius + 25.0), playerRoundCommitted_[i]);
+            }
             const auto actionDirection = actionDirections[i];
             const auto actionDistance = 45.0 + std::abs(actionDirection.x()) * 31.0 + std::abs(actionDirection.y()) * 19.0;
             const auto winningsDistance = 45.0 + std::abs(actionDirection.x()) * 35.0 + std::abs(actionDirection.y()) * 20.0;
             drawActionBox(painter, point + actionDirection * actionDistance, playerLastActions_[i]);
             drawWinningsBox(painter, point - actionDirection * winningsDistance, playerPotWinnings_[i], playerNetWinnings_[i]);
-            if (showdownOccurred_ && !playerFolded_[i] && !playerHoleCards_[i].isEmpty()) {
+            if (showdownOccurred_ && playerNames_[i] != localPlayerName_ && !playerFolded_[i] && !playerHoleCards_[i].isEmpty()) {
                 drawPlayerCards(painter, playerHoleCards_[i], playerShowdownDescriptions_[i], point, inward,
                     isSouthSeat(i), 38, 52);
             }
-        }
-        if (hasLocalSeat && !localHoleCards_.isEmpty()) {
-            const auto localIndex = std::ranges::find(playerNames_, localPlayerName_);
-            const auto localFolded = localIndex != playerNames_.end() && playerFolded_[static_cast<std::size_t>(std::distance(playerNames_.begin(), localIndex))];
-            if (!showdownOccurred_ || localFolded) drawHoleCards(painter, localPoint, inwardDirections[localSeatIndex], isSouthSeat(localSeatIndex),
-                localIndex == playerNames_.end() ? QString{} : playerShowdownDescriptions_[static_cast<std::size_t>(std::distance(playerNames_.begin(), localIndex))]);
         }
     }
 
@@ -331,49 +369,16 @@ private:
         bool visible{false};
     };
 
-    struct CompactCard {
-        QString rank;
-        QString suit;
-        QColor color;
-    };
-
     enum class RoleButton { none, dealer, smallBlind, bigBlind };
 
     [[nodiscard]] static QString chips(qint64 amount) { return QLocale().toString(amount); }
-
-    [[nodiscard]] static CompactCard compactCard(const QString& description) {
-        const auto pieces = description.split(' ', Qt::SkipEmptyParts);
-        const auto rank = pieces.value(0, "?");
-        const auto suitName = pieces.value(2).toLower();
-        if (suitName == "clubs") return {rank, "♣", QColor("#172018")};
-        if (suitName == "diamonds") return {rank, "♦", QColor("#C82B30")};
-        if (suitName == "hearts") return {rank, "♥", QColor("#C82B30")};
-        if (suitName == "spades") return {rank, "♠", QColor("#172018")};
-        return {rank, "?", QColor("#172018")};
-    }
-
-    static void drawCard(QPainter& painter, const QRectF& cardRect, const QString& description) {
-        const auto card = compactCard(description);
-        painter.save();
-        painter.setPen(QPen(QColor("#C8A55B"), 2));
-        painter.setBrush(QColor("#FFF9EA"));
-        painter.drawRoundedRect(cardRect, 7, 7);
-        painter.setPen(card.color);
-        const auto rankSize = std::max(9, static_cast<int>(cardRect.height() * 0.22));
-        const auto suitSize = std::max(16, static_cast<int>(cardRect.height() * 0.46));
-        painter.setFont(QFont("Helvetica", rankSize, QFont::Bold));
-        painter.drawText(cardRect.adjusted(4, 3, -3, -3), Qt::AlignLeft | Qt::AlignTop, card.rank);
-        painter.setFont(QFont("Helvetica", suitSize, QFont::DemiBold));
-        painter.drawText(cardRect.adjusted(2, cardRect.height() * 0.13, -2, 0), Qt::AlignCenter, card.suit);
-        painter.restore();
-    }
 
     static void drawCardRow(QPainter& painter, const QStringList& cards, QPointF center, qreal width, qreal height) {
         constexpr qreal gap = 8;
         const auto totalWidth = cards.size() * width + std::max<qsizetype>(0, cards.size() - 1) * gap;
         auto left = center.x() - totalWidth / 2.0;
         for (const auto& card : cards) {
-            drawCard(painter, {left, center.y() - height / 2.0, width, height}, card);
+            drawCardFace(painter, {left, center.y() - height / 2.0, width, height}, card);
             left += width + gap;
         }
     }
@@ -473,6 +478,19 @@ private:
         painter.restore();
     }
 
+    static void drawPendingBet(QPainter& painter, QPointF center, qint64 amount) {
+        if (amount <= 0) return;
+        const QRectF rect(center.x() - 34, center.y() - 14, 68, 28);
+        painter.save();
+        painter.setPen(QPen(QColor("#6C5200"), 1));
+        painter.setBrush(QColor("#F5E400"));
+        painter.drawRoundedRect(rect, 12, 12);
+        painter.setPen(QColor("#171717"));
+        painter.setFont(QFont("Helvetica", 11, QFont::Bold));
+        painter.drawText(rect.adjusted(4, 2, -4, -2), Qt::AlignCenter, chips(amount));
+        painter.restore();
+    }
+
     void drawBoard(QPainter& painter, const QRectF& felt) const {
         painter.save();
         painter.setPen(Qt::white);
@@ -488,17 +506,10 @@ private:
         painter.restore();
     }
 
-    void drawHoleCards(QPainter& painter, const QPointF& localPoint, const QPointF& inward, bool southSeat,
-        const QString& description) const {
-        painter.save();
-        drawPlayerCards(painter, localHoleCards_, street_ == "Showdown" ? description : QString{}, localPoint, inward,
-            southSeat, 46, 64);
-        painter.restore();
-    }
-
     std::array<QString, defaultTableSeats> playerNames_{};
     std::array<qint64, defaultTableSeats> playerStacks_{};
     std::array<qint64, defaultTableSeats> playerCommitted_{};
+    std::array<qint64, defaultTableSeats> playerRoundCommitted_{};
     std::array<bool, defaultTableSeats> playerActing_{};
     std::array<bool, defaultTableSeats> playerDealer_{};
     std::array<bool, defaultTableSeats> playerFolded_{};
@@ -521,6 +532,48 @@ private:
     QPixmap foldedHands_{":/bluffskill/resources/folded_hands.png"};
     QRectF dealerButtonRect_;
     std::function<void()> dealerAdvanceHandler_;
+};
+
+class LocalHoleCardsWidget final : public QWidget {
+public:
+    explicit LocalHoleCardsWidget(QWidget* parent = nullptr) : QWidget(parent) {
+        setVisible(false);
+        setAccessibleName("Your hole cards");
+    }
+
+    void setCards(QStringList cards, QString description = {}) {
+        cards_ = std::move(cards);
+        description_ = std::move(description);
+        const auto showingDescription = !description_.isEmpty();
+        setFixedSize(showingDescription ? 240 : 108, showingDescription ? 98 : 68);
+        setVisible(!cards_.isEmpty());
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        if (cards_.isEmpty()) return;
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        constexpr qreal cardWidth = 46.0;
+        constexpr qreal cardHeight = 64.0;
+        constexpr qreal gap = 8.0;
+        const auto rowWidth = cards_.size() * cardWidth + std::max<qsizetype>(0, cards_.size() - 1) * gap;
+        auto left = (width() - rowWidth) / 2.0;
+        for (const auto& card : cards_) {
+            drawCardFace(painter, {left, 2.0, cardWidth, cardHeight}, card);
+            left += cardWidth + gap;
+        }
+        if (!description_.isEmpty()) {
+            painter.setPen(QColor("#172018"));
+            painter.setFont(QFont("Helvetica", 11, QFont::DemiBold));
+            painter.drawText(QRectF(3, 70, width() - 6, 25), Qt::AlignCenter | Qt::TextWordWrap, description_);
+        }
+    }
+
+private:
+    QStringList cards_;
+    QString description_;
 };
 
 class SettingsDialog final : public QDialog {
@@ -766,6 +819,8 @@ public:
         wagerLayout->addWidget(denominationControls_);
         wagerLayout->addWidget(wagerStatus_);
         wagerLayout->addStretch(1);
+        localHoleCardsWidget_ = new LocalHoleCardsWidget(actions);
+        wagerLayout->addWidget(localHoleCardsWidget_);
         actionLayout->addLayout(wagerLayout);
         layout->addWidget(actions);
         setCentralWidget(central);
@@ -1073,6 +1128,7 @@ private:
     void applyTableView(const QJsonObject& view) {
         const auto previousStreet = lastStreet_;
         pokerTable_->setTableView(view);
+        localHoleCardsWidget_->setCards(pokerTable_->localHoleCards(), pokerTable_->localShowdownDescription());
         tableSequence_ = view.value("sequence").toInteger();
         lastStreet_ = view.value("street").toString();
         const auto presentingAutomatedActions = queueNewActionBoxes(view, previousStreet);
@@ -1626,6 +1682,7 @@ private:
         pendingHumanPlayer_.reset();
         humanPlayer_.reset();
         pokerTable_->setLocalPlayerName({});
+        localHoleCardsWidget_->setCards(QStringList{});
         setActionControlsEnabled(false);
         setWagerControlsEnabled(false);
         amountEdit_->clear();
@@ -1697,6 +1754,7 @@ private:
     QLineEdit* nextDealIn_{};
     QPushButton* dealNowButton_{};
     PokerTable* pokerTable_{};
+    LocalHoleCardsWidget* localHoleCardsWidget_{};
     QLabel* actionClockCaption_{};
     QLineEdit* actionClockValue_{};
     QLabel* wagerStatus_{};

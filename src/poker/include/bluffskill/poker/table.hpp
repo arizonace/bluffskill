@@ -78,6 +78,7 @@ struct TablePlayerView {
     std::size_t seat{0};
     Chips stack{0};
     Chips committed{0};
+    Chips roundCommitted{0}; // Chips awaiting collection into the center pot for this betting round.
     bool folded{false};
     bool dealer{false};
     bool acting{false};

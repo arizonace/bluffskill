@@ -24,6 +24,8 @@ int main() {
     assert(publicView.smallBlind == 25);
     assert(publicView.bigBlind == 50);
     assert(publicView.roundsPlayed == 1);
+    assert(publicView.players[1].roundCommitted == 25);
+    assert(publicView.players[2].roundCommitted == 50);
     assert(publicView.actingSeat == 1);
     assert(publicView.smallBlindSeat == 2);
     assert(publicView.bigBlindSeat == 3);
@@ -108,6 +110,9 @@ int main() {
     auto noAllInView = noAllInSidePot.viewFor("Raise");
     noAllInSidePot.submitAction("Raise", Action::raise, 200, noAllInView.eventSequence);
     noAllInView = noAllInSidePot.viewFor("CallOne");
+    assert(noAllInView.players[0].roundCommitted == 200);
+    assert(noAllInView.players[1].roundCommitted == 25);
+    assert(noAllInView.players[2].roundCommitted == 50);
     noAllInSidePot.submitAction("CallOne", Action::call, 0, noAllInView.eventSequence);
     noAllInView = noAllInSidePot.viewFor("CallTwo");
     noAllInSidePot.submitAction("CallTwo", Action::call, 0, noAllInView.eventSequence);
@@ -115,6 +120,7 @@ int main() {
     assert(noAllInView.street == Street::flop);
     assert(noAllInView.pots.size() == 1);
     assert(noAllInView.pots[0].amount == 600);
+    for (const auto& player : noAllInView.players) assert(player.roundCommitted == 0);
 
     Table rotation("Rotation", 3, 500);
     rotation.seatPlayer("One", PlayerKind::api, 1, 500);

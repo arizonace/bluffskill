@@ -485,6 +485,7 @@ TableView Table::viewFor(std::string_view viewerName) const {
     const auto* viewer = seatFor(viewerName);
     for (const auto& seat : seats_) {
         TablePlayerView player{.name = seat.name, .kind = seat.kind, .seat = seat.number, .stack = seat.stack, .committed = seat.handCommitted,
+                               .roundCommitted = seat.roundCommitted,
                                .folded = seat.folded, .dealer = dealerSeat_ && *dealerSeat_ == seat.number,
                                .acting = actingSeat_ && *actingSeat_ == seat.number};
         if (viewer == &seat || (showdownOccurred_ && !seat.folded)) player.holeCards = seat.holeCards;
