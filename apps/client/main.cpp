@@ -1155,11 +1155,26 @@ private:
 
     void applyTableView(const QJsonObject& view) {
         const auto previousStreet = lastStreet_;
+        const auto deferShowdownForAutomatedActions = presentFinalAutomatedActions_
+            && view.value("street").toString() == "Showdown";
+        if (deferShowdownForAutomatedActions) {
+            const auto presentingAutomatedActions = queueNewActionBoxes(view, previousStreet, true);
+            presentFinalAutomatedActions_ = false;
+            if (presentingAutomatedActions) {
+                stopTurnCountdown();
+                setActionControlsEnabled(false);
+                setWagerControlsEnabled(false);
+                return;
+            }
+        } else {
+            presentFinalAutomatedActions_ = false;
+        }
         pokerTable_->setTableView(view);
         localHoleCardsWidget_->setCards(view.value("street").toString() == "Showdown" ? QStringList{} : pokerTable_->localHoleCards());
         tableSequence_ = view.value("sequence").toInteger();
         lastStreet_ = view.value("street").toString();
-        const auto presentingAutomatedActions = queueNewActionBoxes(view, previousStreet);
+        const auto presentingAutomatedActions = deferShowdownForAutomatedActions
+            ? false : queueNewActionBoxes(view, previousStreet);
         int remaining = 0;
         int playersWithChips = 0;
         QString tableWinner;
@@ -1266,7 +1281,7 @@ private:
         return false;
     }
 
-    bool queueNewActionBoxes(const QJsonObject& view, const QString& previousStreet) {
+    bool queueNewActionBoxes(const QJsonObject& view, const QString& previousStreet, bool preserveShowdownAutomatedActions = false) {
         const auto history = view.value("actionHistory").toArray();
         const auto players = view.value("players").toArray();
         const auto newHand = history.size() < displayedActionHistoryCount_
@@ -1277,12 +1292,11 @@ private:
             automatedActionTimer_.stop();
             pokerTable_->clearActionBoxes();
         }
-        // The server has already completed the hand when it projects Showdown.
-        // Reference-player actions can arrive in that response as one batch;
-        // they are historical, not pending turns to present.  Do not let their
-        // presentation animation postpone the dealer countdown or impersonate
-        // the authoritative acting indicator after the hand is settled.
-        if (view.value("street").toString() == "Showdown") {
+        // A completed table normally begins its deal countdown immediately.
+        // A human fold or all-in may, however, cause the authoritative server
+        // to resolve several reference-player actions in one response. Replay
+        // those historical actions before revealing the resulting showdown.
+        if (view.value("street").toString() == "Showdown" && !preserveShowdownAutomatedActions) {
             displayedActionHistoryCount_ = history.size();
             automatedActionQueue_.clear();
             automatedActionTimer_.stop();
@@ -1716,6 +1730,10 @@ private:
             : bluffskill::client::HumanAction::fold;
         humanPlayer_->selectAction(humanAction);
         if (competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        const auto isAllInBetOrRaise = (humanAction == bluffskill::client::HumanAction::bet
+            || humanAction == bluffskill::client::HumanAction::raise)
+            && wagerMaximum_ > 0 && wagerAmount() >= wagerMaximum_;
+        presentFinalAutomatedActions_ = humanAction == bluffskill::client::HumanAction::fold || isAllInBetOrRaise;
         const auto amount = humanAction == bluffskill::client::HumanAction::bet || humanAction == bluffskill::client::HumanAction::raise
             ? wagerExistingCommitment_ + wagerAmount() : 0;
         setActionControlsEnabled(false);
@@ -1731,6 +1749,7 @@ private:
             release(reply);
             if (attempt != connectionGeneration_ || !connected_) return;
             if (!success) {
+                presentFinalAutomatedActions_ = false;
                 const auto detail = response.value("error").toString("The server rejected the action.");
                 statusBar()->showMessage(detail);
                 statusBar()->showMessage("Action was not accepted; refreshing the table.");
@@ -1738,7 +1757,7 @@ private:
                 return;
             }
             applyTableView(response);
-            statusBar()->showMessage("Action accepted by the server.");
+            if (!automatedActionTimer_.isActive()) statusBar()->showMessage("Action accepted by the server.");
         });
     }
 
@@ -1763,6 +1782,7 @@ private:
         displayedActionHistoryCount_ = 0;
         automatedActionQueue_.clear();
         automatedActionTimer_.stop();
+        presentFinalAutomatedActions_ = false;
         pokerTable_->clearActionBoxes();
         tableComplete_ = false;
         remainingPlayersCaption_->setText("Remaining Players:");
@@ -1810,6 +1830,7 @@ private:
     bool tableComplete_{};
     bool turnCanCheck_{};
     bool turnCanFold_{};
+    bool presentFinalAutomatedActions_{};
     PauseReason pauseReason_{PauseReason::none};
     QTimer nextHandTimer_;
     QTimer nextDealCountdownTimer_;
