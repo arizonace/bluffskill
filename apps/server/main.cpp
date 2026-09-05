@@ -518,6 +518,21 @@ private:
         return annotations.join(", ");
     }
 
+    [[nodiscard]] static bluffskill::poker::Chips committedThroughAction(const bluffskill::poker::TableView& view,
+        std::size_t seat, std::size_t lastActionIndex) {
+        bluffskill::poker::Chips committed = 0;
+        const auto actionCount = std::min(lastActionIndex + 1, view.actionHistory.size());
+        for (std::size_t index = 0; index < actionCount; ++index) {
+            const auto& action = view.actionHistory.at(index);
+            if (action.seat == seat) committed += action.amount;
+        }
+        return committed;
+    }
+
+    [[nodiscard]] static QString lostValue(bluffskill::poker::Chips amount) {
+        return amount > 0 ? '-' + QLocale().toString(amount) : QString{};
+    }
+
     void refreshActionLog() {
         for (const auto& competition : house_.competitions()) {
             for (const auto& table : competition.tables) {
@@ -574,9 +589,11 @@ private:
                         : action.street == bluffskill::poker::Street::turn ? std::size_t{4}
                         : action.street == bluffskill::poker::Street::river ? std::size_t{5} : std::size_t{0};
                     appendCommunityCardLogRows(view, cursor, visibleCards);
+                    const auto value = action.action == bluffskill::poker::Action::fold
+                        ? lostValue(committedThroughAction(view, action.seat, static_cast<std::size_t>(index)))
+                        : action.amount == 0 ? QString{} : QLocale().toString(action.amount);
                     appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
-                        QString::fromUtf8(bluffskill::poker::toString(action.action)),
-                        action.amount == 0 ? QString{} : QLocale().toString(action.amount), QLocale().toString(action.stackAfter),
+                        QString::fromUtf8(bluffskill::poker::toString(action.action)), value, QLocale().toString(action.stackAfter),
                         actionAnnotations(view, static_cast<std::size_t>(index)));
                 }
                 appendCommunityCardLogRows(view, cursor, view.communityCards.size());
@@ -624,7 +641,8 @@ private:
                         for (const auto& player : view.players) {
                             const auto seat = static_cast<int>(player.seat);
                             if (player.folded || cursor.loggedShowdownHandSeats.contains(seat)) continue;
-                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", "Hand", {}, QLocale().toString(player.stack),
+                            const auto lost = committedThroughAction(view, player.seat, view.actionHistory.size()) - winningsBySeat.value(seat);
+                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", "Hand", lostValue(lost), QLocale().toString(player.stack),
                                 showdownHand(player));
                             cursor.loggedShowdownHandSeats.insert(seat);
                         }
