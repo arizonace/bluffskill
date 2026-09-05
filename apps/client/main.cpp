@@ -738,6 +738,66 @@ private:
     QLineEdit* port_{};
 };
 
+struct CustomGameConfiguration {
+    bool includeHuman{true};
+    QString playerName;
+    int leoPlayers{5};
+    int virgoPlayers{4};
+};
+
+class CustomGameDialog final : public QDialog {
+public:
+    explicit CustomGameDialog(const QString& defaultPlayerName, QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle("Custom Game");
+        auto* layout = new QVBoxLayout(this);
+        layout->addWidget(new QLabel("Choose exactly 10 players for this table.", this));
+        auto* form = new QFormLayout;
+        includeHuman_ = new QCheckBox("Include local human player", this);
+        includeHuman_->setChecked(true);
+        playerName_ = new QLineEdit(defaultPlayerName, this);
+        leoPlayers_ = new QSpinBox(this); leoPlayers_->setRange(0, defaultTableSeats); leoPlayers_->setValue(5);
+        virgoPlayers_ = new QSpinBox(this); virgoPlayers_->setRange(0, defaultTableSeats); virgoPlayers_->setValue(4);
+        total_ = new QLabel(this);
+        form->addRow("Human player", includeHuman_);
+        form->addRow("Player name", playerName_);
+        form->addRow("Leo players", leoPlayers_);
+        form->addRow("Virgo players", virgoPlayers_);
+        form->addRow("Total", total_);
+        layout->addLayout(form);
+        buttons_ = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
+        connect(buttons_, &QDialogButtonBox::accepted, this, [this] { accept(); });
+        connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        connect(includeHuman_, &QCheckBox::toggled, this, [this] { updateState(); });
+        connect(playerName_, &QLineEdit::textChanged, this, [this] { updateState(); });
+        connect(leoPlayers_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { updateState(); });
+        connect(virgoPlayers_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { updateState(); });
+        layout->addWidget(buttons_);
+        updateState();
+    }
+
+    [[nodiscard]] CustomGameConfiguration configuration() const {
+        return {.includeHuman = includeHuman_->isChecked(), .playerName = playerName_->text().trimmed(),
+            .leoPlayers = leoPlayers_->value(), .virgoPlayers = virgoPlayers_->value()};
+    }
+
+private:
+    void updateState() {
+        playerName_->setEnabled(includeHuman_->isChecked());
+        const auto total = (includeHuman_->isChecked() ? 1 : 0) + leoPlayers_->value() + virgoPlayers_->value();
+        const auto valid = total == defaultTableSeats && (!includeHuman_->isChecked() || !playerName_->text().trimmed().isEmpty());
+        total_->setText(QString::number(total) + " / " + QString::number(defaultTableSeats));
+        total_->setStyleSheet(valid ? QString{} : QStringLiteral("color: #B00020;"));
+        buttons_->button(QDialogButtonBox::Ok)->setEnabled(valid);
+    }
+
+    QCheckBox* includeHuman_{};
+    QLineEdit* playerName_{};
+    QSpinBox* leoPlayers_{};
+    QSpinBox* virgoPlayers_{};
+    QLabel* total_{};
+    QDialogButtonBox* buttons_{};
+};
+
 class ClientWindow final : public QMainWindow {
 public:
     ClientWindow() : settings_(bluffskill::app_config::AppConfig::load()) {
@@ -895,8 +955,10 @@ public:
         connect(disconnectAction_, &QAction::triggered, this, [this] { disconnectFromServer(); });
         auto* gameMenu = menuBar()->addMenu("Game");
         newGameAction_ = gameMenu->addAction("New Game…");
-        newGameAction_->setEnabled(false);
+        customGameAction_ = gameMenu->addAction("Custom Game…");
+        setNewGameActionsEnabled(false);
         connect(newGameAction_, &QAction::triggered, this, [this] { newGame(); });
+        connect(customGameAction_, &QAction::triggered, this, [this] { customGame(); });
         restartGameAction_ = gameMenu->addAction("Restart Game");
         restartGameAction_->setEnabled(false);
         connect(restartGameAction_, &QAction::triggered, this, [this] { restartGame(); });
@@ -964,6 +1026,11 @@ private:
                 + "\n\n© AzoneLayer · azonelayer.com\nLicensed under the MIT License.");
     }
 
+    void setNewGameActionsEnabled(bool enabled) {
+        newGameAction_->setEnabled(enabled);
+        customGameAction_->setEnabled(enabled);
+    }
+
     void resetDisconnectedUi() {
         server_->clear();
         server_->addItem("Not connected");
@@ -976,7 +1043,7 @@ private:
         table_->setEnabled(false);
         clearHumanPlayer();
         disconnectAction_->setEnabled(false);
-        newGameAction_->setEnabled(false);
+        setNewGameActionsEnabled(false);
         restartGameAction_->setEnabled(false);
     }
 
@@ -990,7 +1057,7 @@ private:
     void connectToEndpoint(QUrl baseUrl, const QString& address, bool automatic) {
         const auto attempt = ++connectionGeneration_;
         if (healthReply_) healthReply_->abort();
-        newGameAction_->setEnabled(false);
+        setNewGameActionsEnabled(false);
         statusBar()->showMessage("Connecting to " + address + "…");
         auto healthUrl = baseUrl;
         healthUrl.setPath("/v1/health");
@@ -1018,7 +1085,7 @@ private:
                 const auto detail = status > 0 ? "The server returned HTTP " + QString::number(status) + "." : error;
                 QMessageBox::warning(this, "Server unavailable",
                     "BluffSkill could not verify the server at " + address + ".\n\n" + detail);
-                newGameAction_->setEnabled(connected_);
+                setNewGameActionsEnabled(connected_);
                 return;
             }
 
@@ -1030,7 +1097,7 @@ private:
             server_->clear();
             server_->addItem(address);
             disconnectAction_->setEnabled(true);
-            newGameAction_->setEnabled(true);
+            setNewGameActionsEnabled(true);
             restartGameAction_->setEnabled(true);
             statusBar()->showMessage("Connected to " + address);
             refreshCompetitions();
@@ -1740,7 +1807,7 @@ private:
         bluffskill::app_config::AppConfig::save(settings_);
         const auto attempt = connectionGeneration_;
         pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName);
-        newGameAction_->setEnabled(false);
+        setNewGameActionsEnabled(false);
         const auto humanSeat = QRandomGenerator::global()->bounded(1, defaultTableSeats + 1);
         const auto referenceTypes = randomReferencePlayerTypes(defaultTableSeats - 1);
         QVector<QString> referencesBeforeHuman;
@@ -1764,13 +1831,71 @@ private:
             if (!success) {
                 QMessageBox::warning(this, "New game failed", "The server could not create a new competition.");
                 pendingHumanPlayer_.reset();
-                newGameAction_->setEnabled(true);
+                setNewGameActionsEnabled(true);
                 return;
             }
             const auto competitionName = competition.value("name").toString();
             addReferencePlayers(competitionName, attempt, std::move(referencesBeforeHuman),
                 [this, competitionName, attempt, humanSeat, referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
                     attachHumanPlayer(competitionName, "Red", attempt, humanSeat, std::move(referencesAfterHuman));
+                });
+        });
+    }
+
+    void customGame() {
+        if (!connected_) return;
+        CustomGameDialog dialog(settings_.defaultPlayerName, this);
+        if (dialog.exec() != QDialog::Accepted) return;
+        const auto configuration = dialog.configuration();
+        if (configuration.includeHuman) {
+            settings_.defaultPlayerName = configuration.playerName;
+            bluffskill::app_config::AppConfig::save(settings_);
+            pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(configuration.playerName);
+        } else {
+            clearHumanPlayer();
+        }
+
+        auto referenceTypes = referencePlayerTypes(configuration.leoPlayers, configuration.virgoPlayers);
+        const auto humanSeat = configuration.includeHuman ? QRandomGenerator::global()->bounded(1, defaultTableSeats + 1) : 0;
+        QVector<QString> referencesBeforeHuman;
+        QVector<QString> referencesAfterHuman;
+        for (qsizetype index = 0; index < referenceTypes.size(); ++index) {
+            (configuration.includeHuman && index >= humanSeat - 1 ? referencesAfterHuman : referencesBeforeHuman).append(referenceTypes[index]);
+        }
+
+        const auto attempt = connectionGeneration_;
+        setNewGameActionsEnabled(false);
+        statusBar()->showMessage("Creating a custom tournament…");
+        auto* reply = postJson("/v1/competitions", QJsonObject{
+            {"flavor", "NoLimitTexasHoldEm"},
+            {"maximumPlayers", defaultTableSeats},
+            {"startingStack", 7000},
+        });
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, configuration, humanSeat,
+            referencesBeforeHuman = std::move(referencesBeforeHuman), referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto competition = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 201;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            if (!success) {
+                QMessageBox::warning(this, "Custom game failed", "The server could not create a new competition.");
+                pendingHumanPlayer_.reset();
+                setNewGameActionsEnabled(true);
+                return;
+            }
+            const auto competitionName = competition.value("name").toString();
+            addReferencePlayers(competitionName, attempt, std::move(referencesBeforeHuman),
+                [this, competitionName, attempt, configuration, humanSeat, referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
+                    if (configuration.includeHuman) {
+                        attachHumanPlayer(competitionName, "Red", attempt, humanSeat, std::move(referencesAfterHuman));
+                        return;
+                    }
+                    setNewGameActionsEnabled(true);
+                    statusBar()->showMessage("Created " + competitionName + " with "
+                        + QString::number(configuration.leoPlayers) + " Leo and "
+                        + QString::number(configuration.virgoPlayers) + " Virgo reference players.");
+                    refreshCompetitions(competitionName);
                 });
         });
     }
@@ -1786,6 +1911,17 @@ private:
             const auto hasVirgo = std::ranges::any_of(types, [](const QString& type) { return type == "Virgo"; });
             if (!hasLeo) types[QRandomGenerator::global()->bounded(count)] = "Leo";
             if (!hasVirgo) types[QRandomGenerator::global()->bounded(count)] = "Virgo";
+        }
+        return types;
+    }
+
+    [[nodiscard]] static QVector<QString> referencePlayerTypes(int leoPlayers, int virgoPlayers) {
+        QVector<QString> types;
+        types.reserve(leoPlayers + virgoPlayers);
+        for (int index = 0; index < leoPlayers; ++index) types.append("Leo");
+        for (int index = 0; index < virgoPlayers; ++index) types.append("Virgo");
+        for (int index = types.size() - 1; index > 0; --index) {
+            std::swap(types[index], types[QRandomGenerator::global()->bounded(index + 1)]);
         }
         return types;
     }
@@ -1807,7 +1943,7 @@ private:
             if (!success) {
                 QMessageBox::warning(this, "Reference players failed", "The competition was created, but its reference players were not added.");
                 pendingHumanPlayer_.reset();
-                newGameAction_->setEnabled(true);
+                setNewGameActionsEnabled(true);
                 refreshCompetitions(competitionName);
                 return;
             }
@@ -1830,7 +1966,7 @@ private:
                 const auto detail = response.value("error").toString("The server could not attach your player.");
                 QMessageBox::warning(this, "Player attachment failed", detail);
                 pendingHumanPlayer_.reset();
-                newGameAction_->setEnabled(true);
+                setNewGameActionsEnabled(true);
                 refreshCompetitions(competitionName);
                 return;
             }
@@ -1839,7 +1975,7 @@ private:
             setActionControlsEnabled(false);
             statusBar()->showMessage("You are " + humanPlayer_->apiPlayerName() + ". Seating remaining reference players…");
             addReferencePlayers(competitionName, attempt, std::move(referencesAfterHuman), [this, competitionName] {
-                newGameAction_->setEnabled(true);
+                setNewGameActionsEnabled(true);
                 statusBar()->showMessage("You are " + humanPlayer_->apiPlayerName() + ". Retrieving your private table view…");
                 statusBar()->showMessage("Created " + competitionName + " with nine reference players and " + humanPlayer_->apiPlayerName() + ".");
                 refreshCompetitions(competitionName);
@@ -2009,6 +2145,7 @@ private:
     std::vector<QPushButton*> actionButtons_;
     QAction* disconnectAction_{};
     QAction* newGameAction_{};
+    QAction* customGameAction_{};
     QAction* restartGameAction_{};
     qsizetype autoConnectPortIndex_{};
     std::unique_ptr<bluffskill::client::HumanPlayer> pendingHumanPlayer_;
