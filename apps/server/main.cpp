@@ -239,6 +239,7 @@ private:
         QSet<int> loggedShowdownHandSeats;
         bool loggedFoldedPot{false};
         bool loggedTableWinner{false};
+        std::size_t loggedCommunityCards{0};
         qint64 lastBigBlind{0};
     };
 
@@ -259,6 +260,30 @@ private:
 
     [[nodiscard]] static QString showdownHand(const bluffskill::poker::TablePlayerView& player) {
         return QString::fromStdString(player.showdownDescription);
+    }
+
+    [[nodiscard]] static QString communityCards(const bluffskill::poker::TableView& view, std::size_t first, std::size_t count) {
+        QStringList cards;
+        const auto last = std::min(first + count, view.communityCards.size());
+        for (auto index = first; index < last; ++index) {
+            cards.append(QString::fromStdString(bluffskill::cards::toString(view.communityCards[index])));
+        }
+        return cards.join(", ");
+    }
+
+    void appendCommunityCardLogRows(const bluffskill::poker::TableView& view, ActionLogCursor& cursor) {
+        if (cursor.loggedCommunityCards == 0 && view.communityCards.size() >= 3) {
+            appendActionLogRow("Dealer", {}, "Flop", "Deal", {}, {}, communityCards(view, 0, 3));
+            cursor.loggedCommunityCards = 3;
+        }
+        if (cursor.loggedCommunityCards == 3 && view.communityCards.size() >= 4) {
+            appendActionLogRow("Dealer", {}, "Turn", "Deal", {}, {}, communityCards(view, 3, 1));
+            cursor.loggedCommunityCards = 4;
+        }
+        if (cursor.loggedCommunityCards == 4 && view.communityCards.size() >= 5) {
+            appendActionLogRow("Dealer", {}, "River", "Deal", {}, {}, communityCards(view, 4, 1));
+            cursor.loggedCommunityCards = 5;
+        }
     }
 
     [[nodiscard]] static QString actionLogPlayerKind(const bluffskill::poker::TableSummary& table, std::string_view playerName) {
@@ -440,20 +465,21 @@ private:
                     const auto bigBlind = static_cast<qint64>(view.bigBlind);
                     const auto gameStarted = view.roundsPlayed == 1;
                     if (gameStarted) {
-                        appendActionLogRow("Game", {}, "Game", "Start");
+                        appendActionLogRow("Dealer", {}, "Game", "Start");
                         cursor.loggedBustedSeats.clear();
                         cursor.loggedTableWinner = false;
                     }
                     if (cursor.lastBigBlind > 0 && bigBlind > cursor.lastBigBlind) {
                         appendActionLogRow(dealerName, dealerKind, "Deal", "Blinds Up", QLocale().toString(bigBlind), dealerStack);
                     }
-                    appendActionLogRow(dealerName, dealerKind, "Deal", "Deal", {}, dealerStack);
+                    appendActionLogRow("Dealer", {}, "Deal", "Deal", {}, dealerStack);
                     cursor.lastBigBlind = bigBlind;
                     cursor.history.clear();
                     cursor.handStartingStacks.clear();
                     cursor.loggedPotWinnerSeats.clear();
                     cursor.loggedShowdownHandSeats.clear();
                     cursor.loggedFoldedPot = false;
+                    cursor.loggedCommunityCards = 0;
                     for (const auto& player : view.players) {
                         if (player.stack > 0 || player.committed > 0) {
                             cursor.handStartingStacks.insert(static_cast<int>(player.seat), static_cast<qint64>(player.stack + player.committed));
@@ -462,10 +488,24 @@ private:
                 }
                 for (qsizetype index = cursor.history.size(); index < view.actionHistory.size(); ++index) {
                     const auto& action = view.actionHistory[static_cast<std::size_t>(index)];
+                    bool preflopWasUnraised = true;
+                    for (qsizetype priorIndex = 0; priorIndex < index; ++priorIndex) {
+                        const auto& priorAction = view.actionHistory[static_cast<std::size_t>(priorIndex)];
+                        if (priorAction.street == bluffskill::poker::Street::preflop
+                            && priorAction.action == bluffskill::poker::Action::raise) {
+                            preflopWasUnraised = false;
+                            break;
+                        }
+                    }
+                    const auto completesBigBlind = action.action == bluffskill::poker::Action::call
+                        && action.street == bluffskill::poker::Street::preflop
+                        && view.smallBlindSeat && action.seat == *view.smallBlindSeat
+                        && action.amount == view.bigBlind - view.smallBlind && preflopWasUnraised;
                     appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
-                        QString::fromUtf8(bluffskill::poker::toString(action.action)),
+                        completesBigBlind ? QStringLiteral("Complete") : QString::fromUtf8(bluffskill::poker::toString(action.action)),
                         action.amount == 0 ? QString{} : QLocale().toString(action.amount), QLocale().toString(action.stackAfter));
                 }
+                appendCommunityCardLogRows(view, cursor);
                 if (view.street == bluffskill::poker::Street::showdown) {
                     QHash<int, qint64> winningsBySeat;
                     for (const auto& payout : view.payouts) {
