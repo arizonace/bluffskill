@@ -260,10 +260,6 @@ private:
         actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
     }
 
-    [[nodiscard]] static QString showdownHand(const bluffskill::poker::TablePlayerView& player) {
-        return QString::fromStdString(player.showdownDescription);
-    }
-
     [[nodiscard]] static QString pokerNotation(bluffskill::cards::Card card) {
         const auto rank = card.rank == bluffskill::cards::Rank::ten
             ? QStringLiteral("10")
@@ -277,15 +273,26 @@ private:
         return {};
     }
 
+    [[nodiscard]] static QString pokerNotation(std::vector<bluffskill::cards::Card> cards) {
+        std::stable_sort(cards.begin(), cards.end(), [](const auto& left, const auto& right) { return left.rank > right.rank; });
+        QStringList notation;
+        for (const auto card : cards) notation.append(pokerNotation(card));
+        return notation.join(' ');
+    }
+
+    [[nodiscard]] static QString showdownHand(const bluffskill::poker::TablePlayerView& player) {
+        const auto description = QString::fromStdString(player.showdownDescription);
+        if (player.holeCards.empty()) return description;
+        const auto cards = pokerNotation(player.holeCards);
+        return description.isEmpty() ? cards : description + " - " + cards;
+    }
+
     [[nodiscard]] static QString communityCards(const bluffskill::poker::TableView& view, std::size_t first, std::size_t count) {
         std::vector<bluffskill::cards::Card> cards;
         const auto last = std::min(first + count, view.communityCards.size());
         cards.insert(cards.end(), view.communityCards.begin() + static_cast<std::ptrdiff_t>(first),
             view.communityCards.begin() + static_cast<std::ptrdiff_t>(last));
-        std::stable_sort(cards.begin(), cards.end(), [](const auto& left, const auto& right) { return left.rank > right.rank; });
-        QStringList notation;
-        for (const auto card : cards) notation.append(pokerNotation(card));
-        return notation.join(' ');
+        return pokerNotation(std::move(cards));
     }
 
     void appendCommunityCardLogRows(const bluffskill::poker::TableView& view, ActionLogCursor& cursor) {
