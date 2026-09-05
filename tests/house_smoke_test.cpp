@@ -30,11 +30,19 @@ int main() {
     assert(!house.referencePlayerInspection(created.name, "Red", "Arizona"));
 
     bluffskill::poker::House mixedHouse;
-    const auto mixedCompetition = mixedHouse.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7'000});
-    [[maybe_unused]] const auto leo = mixedHouse.createReferencePlayers(mixedCompetition.name, 1, bluffskill::poker::ReferencePlayerType::leo);
-    const auto mixed = mixedHouse.createReferencePlayers(mixedCompetition.name, 1, bluffskill::poker::ReferencePlayerType::virgo);
-    assert(mixed.tables.front().players[0].player.referenceType == bluffskill::poker::ReferencePlayerType::leo);
-    assert(mixed.tables.front().players[1].player.referenceType == bluffskill::poker::ReferencePlayerType::virgo);
+    const auto mixedCompetition = mixedHouse.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7'000});
+    [[maybe_unused]] const auto leo = mixedHouse.createReferencePlayers(mixedCompetition.name, 4, bluffskill::poker::ReferencePlayerType::leo);
+    const auto mixed = mixedHouse.createReferencePlayers(mixedCompetition.name, 5, bluffskill::poker::ReferencePlayerType::virgo);
+    std::set<std::string> mixedNames;
+    for (std::size_t index = 0; index < 4; ++index) {
+        assert(mixed.tables.front().players[index].player.referenceType == bluffskill::poker::ReferencePlayerType::leo);
+        mixedNames.insert(mixed.tables.front().players[index].player.name);
+    }
+    for (std::size_t index = 4; index < 9; ++index) {
+        assert(mixed.tables.front().players[index].player.referenceType == bluffskill::poker::ReferencePlayerType::virgo);
+        mixedNames.insert(mixed.tables.front().players[index].player.name);
+    }
+    assert(mixedNames.size() == 9);
 
     bluffskill::poker::House stagedHouse;
     const auto staged = stagedHouse.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7'000});

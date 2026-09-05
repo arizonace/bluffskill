@@ -42,7 +42,7 @@ API route IDs are canonical human-readable names, not UUIDs. Parse them at the b
 - table: `Color:Competition`;
 - player: `name@table:competition`; name is `[A-Za-z0-9-]+` and unique per competition.
 
-Reject punctuation that conflicts with qualified forms. Name generation is an injectable service with a deterministic test data source. Do not infer semantic meaning from a collision suffix.
+Reject punctuation that conflicts with qualified forms. The built-in house data source shuffles its competition-name and reference-player-name pools once per server instance. Reference names are consumed without replacement from one shared pool for all reference-player types, so a Leo and a Virgo player cannot receive the same generated name. Do not infer semantic meaning from a collision suffix.
 
 ## Non-negotiable rules
 

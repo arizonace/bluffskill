@@ -11,17 +11,45 @@
 
 namespace bluffskill::poker {
 
-House::House(BlindSchedule blindSchedule, ChipDenominations chipDenominations)
-    : blindSchedule_(blindSchedule), chipDenominations_(normalizedChipDenominations(std::move(chipDenominations))) {}
-
-std::string House::nextCompetitionName() const {
-    constexpr std::array places{"Valhalla", "Toronto", "Westeros", "Pantheon", "Riverlands", "Solaris", "Mordor", "NorthPole"};
-    const auto index = competitions_.size();
-    if (index < places.size()) return places[index];
-    return std::string{places[index % places.size()]} + "-" + std::to_string(index + 1);
-}
-
 namespace {
+
+constexpr std::array competitionNames{
+    "Aldebaran", "Alexandria", "Andromeda", "Arcadia", "Asgard", "Athens", "Avalon", "Babylon",
+    "Belfast", "Borealis", "Byzantium", "Cairo", "Caledonia", "Camelot", "Carthage", "Cascadia",
+    "Chimera", "Cimmeria", "Columbia", "Corinth", "Cyrene", "Delphi", "Eldoria", "Elysium",
+    "Everest", "Florence", "Gaia", "Geneva", "Gotham", "Granada", "Havana", "Helios",
+    "Hyperion", "Icarus", "Ionia", "Istanbul", "Juno", "Kilimanjaro", "Kingston", "Kyoto",
+    "Laguna", "Lisbon", "Lumeria", "Luxor", "Madison", "Meridian", "Monaco", "Montreal",
+    "Nairobi", "Nebula", "Newcastle", "Nimrod", "Olympia", "Orion", "Oslo", "Palmyra",
+    "Persepolis", "Phoenix", "Prague", "Rivendell", "Sahara", "Samarkand", "Triton", "Zephyr",
+};
+
+constexpr std::array referencePlayerNames{
+    "Aardvark", "Albatross", "Alpaca", "Antelope", "Armadillo", "Badger", "Barracuda", "Beaver",
+    "Bison", "Bobcat", "Buffalo", "Butterfly", "Camel", "Caribou", "Cheetah", "Condor",
+    "Cougar", "Coyote", "Crane", "Dolphin", "Eagle", "Falcon", "Ferret", "Firefly",
+    "Flamingo", "Fox", "Gazelle", "Gecko", "Giraffe", "Goshawk", "Heron", "Hummingbird",
+    "Hyena", "Ibis", "Jaguar", "Jay", "Kestrel", "Koala", "Lemur", "Leopard",
+    "Lynx", "Macaque", "Magpie", "Manatee", "Marten", "Meerkat", "Mongoose", "Moose",
+    "Narwhal", "Newt", "Nightingale", "Ocelot", "Octopus", "Orca", "Osprey", "Otter",
+    "Owl", "Panda", "Panther", "Parrot", "Peacock", "Pelican", "Peregrine", "Puma",
+    "Quail", "Raccoon", "Raven", "RedPanda", "Reindeer", "Rhino", "Salamander", "Seal",
+    "Serval", "Shark", "Skylark", "Sloth", "Sparrow", "Stoat", "Swan", "Tapir",
+    "Tiger", "Toucan", "Turtle", "Viper", "Walrus", "Weasel", "Whale", "Wildcat",
+    "Wolf", "Wolverine", "Wombat", "Woodpecker", "Yak", "Zebra", "Auk", "Beluga",
+    "Capybara", "Cassowary", "Chameleon", "Chipmunk", "Cormorant", "Dingo", "Dragonfly", "Egret",
+    "Fennec", "Goldfinch", "Grouse", "Kingfisher", "Lobster", "Manta", "Nuthatch", "Puffin",
+    "Sable", "Starling", "Tamarin", "Tern", "Vicuna", "Wagtail", "Zorilla", "Kangaroo",
+};
+
+template <typename T, std::size_t size>
+std::vector<std::string> shuffledNamePool(const std::array<T, size>& names, std::mt19937_64& random) {
+    std::vector<std::string> pool;
+    pool.reserve(names.size());
+    for (const auto name : names) pool.emplace_back(name);
+    std::ranges::shuffle(pool, random);
+    return pool;
+}
 
 std::string normalizeName(std::string_view value) {
     std::string normalized;
@@ -31,6 +59,16 @@ std::string normalizeName(std::string_view value) {
 }
 
 } // namespace
+
+House::House(BlindSchedule blindSchedule, ChipDenominations chipDenominations)
+    : blindSchedule_(blindSchedule), chipDenominations_(normalizedChipDenominations(std::move(chipDenominations))),
+      competitionNamePool_(shuffledNamePool(competitionNames, random_)),
+      referencePlayerNamePool_(shuffledNamePool(referencePlayerNames, random_)) {}
+
+std::string House::nextCompetitionName() {
+    if (nextCompetitionNameIndex_ == competitionNamePool_.size()) throw std::runtime_error("competition name pool is exhausted");
+    return competitionNamePool_.at(nextCompetitionNameIndex_++);
+}
 
 CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
     if (spec.maximumPlayers == 0 || spec.maximumPlayers > 10) {
@@ -70,17 +108,14 @@ const House::Competition* House::findCompetition(std::string_view name) const {
 }
 
 std::string House::nextReferencePlayerName(const Competition& competition) {
-    constexpr std::array animals{"Fox", "Badger", "Otter", "Lynx", "Raven", "Puma", "Marten", "Heron", "Wolf", "Falcon"};
-    std::uniform_int_distribution<std::size_t> animal(0, animals.size() - 1);
-    std::uniform_int_distribution<int> suffix(10, 99);
-    for (int attempts = 0; attempts < 500; ++attempts) {
-        const auto candidate = std::string{animals[animal(random_)]} + std::to_string(suffix(random_));
+    while (nextReferencePlayerNameIndex_ < referencePlayerNamePool_.size()) {
+        const auto candidate = referencePlayerNamePool_.at(nextReferencePlayerNameIndex_++);
         const auto exists = std::ranges::any_of(competition.players, [&candidate](const auto& player) {
-            return player.player->name() == candidate;
+            return normalizeName(player.player->name()) == normalizeName(candidate);
         });
         if (!exists) return candidate;
     }
-    throw std::runtime_error("could not assign a unique reference-player name");
+    throw std::runtime_error("reference-player name pool is exhausted");
 }
 
 std::size_t House::findTableIndex(const Competition& competition, std::string_view tableName) const {

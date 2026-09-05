@@ -151,8 +151,8 @@ public:
         log_ = new QPlainTextEdit(splitter);
         log_->setReadOnly(true);
         actionLog_ = new QTableWidget(splitter);
-        actionLog_->setColumnCount(6);
-        actionLog_->setHorizontalHeaderLabels({"Player", "Round", "Action", "Value", "Stack", "Hand"});
+        actionLog_->setColumnCount(7);
+        actionLog_->setHorizontalHeaderLabels({"Player", "Kind", "Round", "Action", "Value", "Stack", "Hand"});
         actionLog_->horizontalHeader()->setStretchLastSection(true);
         actionLog_->verticalHeader()->setVisible(false);
         actionLog_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -239,22 +239,34 @@ private:
         qint64 lastBigBlind{0};
     };
 
-    void appendActionLogRow(const QString& player, const QString& round, const QString& action, const QString& value = {}, const QString& stack = {},
+    void appendActionLogRow(const QString& player, const QString& kind, const QString& round, const QString& action, const QString& value = {}, const QString& stack = {},
         const QString& hand = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
         actionLog_->setItem(row, 0, new QTableWidgetItem(player));
-        actionLog_->setItem(row, 1, new QTableWidgetItem(round));
-        actionLog_->setItem(row, 2, new QTableWidgetItem(action));
-        actionLog_->setItem(row, 3, new QTableWidgetItem(value));
-        actionLog_->setItem(row, 4, new QTableWidgetItem(stack));
-        actionLog_->setItem(row, 5, new QTableWidgetItem(hand));
+        actionLog_->setItem(row, 1, new QTableWidgetItem(kind));
+        actionLog_->setItem(row, 2, new QTableWidgetItem(round));
+        actionLog_->setItem(row, 3, new QTableWidgetItem(action));
+        actionLog_->setItem(row, 4, new QTableWidgetItem(value));
+        actionLog_->setItem(row, 5, new QTableWidgetItem(stack));
+        actionLog_->setItem(row, 6, new QTableWidgetItem(hand));
         actionLog_->item(row, 0)->setData(Qt::UserRole, activeActionLogTableKey_);
         actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
     }
 
     [[nodiscard]] static QString showdownHand(const bluffskill::poker::TablePlayerView& player) {
         return QString::fromStdString(player.showdownDescription);
+    }
+
+    [[nodiscard]] static QString actionLogPlayerKind(const bluffskill::poker::TableSummary& table, std::string_view playerName) {
+        const auto player = std::ranges::find_if(table.players, [playerName](const auto& seatedPlayer) {
+            return seatedPlayer.player.name == playerName;
+        });
+        if (player == table.players.end()) return {};
+        if (player->player.referenceType) {
+            return QString::fromUtf8(bluffskill::poker::toString(*player->player.referenceType));
+        }
+        return QString::fromUtf8(bluffskill::poker::toString(player->player.kind));
     }
 
     [[nodiscard]] static QString csvCell(QString value) {
@@ -273,11 +285,12 @@ private:
             const auto* player = actionLog_->item(row, 0);
             if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
             actions.append(QJsonObject{{"player", player->text()},
-                {"round", actionLog_->item(row, 1)->text()},
-                {"action", actionLog_->item(row, 2)->text()},
-                {"value", actionLog_->item(row, 3)->text()},
-                {"stack", actionLog_->item(row, 4)->text()},
-                {"hand", actionLog_->item(row, 5)->text()}});
+                {"kind", actionLog_->item(row, 1)->text()},
+                {"round", actionLog_->item(row, 2)->text()},
+                {"action", actionLog_->item(row, 3)->text()},
+                {"value", actionLog_->item(row, 4)->text()},
+                {"stack", actionLog_->item(row, 5)->text()},
+                {"hand", actionLog_->item(row, 6)->text()}});
         }
         return actions;
     }
@@ -314,7 +327,7 @@ private:
     }
 
     bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
-        QString csv = "Player,Round,Action,Value,Stack,Hand\n";
+        QString csv = "Player,Kind,Round,Action,Value,Stack,Hand\n";
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
             const auto* player = actionLog_->item(row, 0);
             if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
@@ -377,6 +390,9 @@ private:
         for (const auto& competition : house_.competitions()) {
             for (const auto& table : competition.tables) {
                 const auto view = house_.tableView(competition.name, table.name);
+                const auto kindFor = [&table](std::string_view playerName) {
+                    return actionLogPlayerKind(table, playerName);
+                };
                 QStringList history;
                 for (const auto& action : view.actionHistory) history.append(actionFingerprint(action));
                 const auto tableKey = QString::fromStdString(competition.name) + '/' + QString::fromStdString(table.name);
@@ -393,19 +409,20 @@ private:
                         return seat && player.seat == *seat;
                     });
                     const auto dealerName = dealer == view.players.end() ? QString{} : QString::fromStdString(dealer->name);
+                    const auto dealerKind = dealer == view.players.end() ? QString{} : kindFor(dealer->name);
                     const auto dealerStack = dealer == view.players.end() ? QString{}
                         : QLocale().toString(static_cast<qint64>(dealer->stack + dealer->committed));
                     const auto bigBlind = static_cast<qint64>(view.bigBlind);
                     const auto gameStarted = view.roundsPlayed == 1;
                     if (gameStarted) {
-                        appendActionLogRow("Game", "Game", "Start");
+                        appendActionLogRow("Game", {}, "Game", "Start");
                         cursor.loggedBustedSeats.clear();
                         cursor.loggedTableWinner = false;
                     }
                     if (cursor.lastBigBlind > 0 && bigBlind > cursor.lastBigBlind) {
-                        appendActionLogRow(dealerName, "Deal", "Blinds Up", QLocale().toString(bigBlind), dealerStack);
+                        appendActionLogRow(dealerName, dealerKind, "Deal", "Blinds Up", QLocale().toString(bigBlind), dealerStack);
                     }
-                    appendActionLogRow(dealerName, "Deal", "Deal", {}, dealerStack);
+                    appendActionLogRow(dealerName, dealerKind, "Deal", "Deal", {}, dealerStack);
                     cursor.lastBigBlind = bigBlind;
                     cursor.history.clear();
                     cursor.handStartingStacks.clear();
@@ -420,7 +437,7 @@ private:
                 }
                 for (qsizetype index = cursor.history.size(); index < view.actionHistory.size(); ++index) {
                     const auto& action = view.actionHistory[static_cast<std::size_t>(index)];
-                    appendActionLogRow(QString::fromStdString(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
+                    appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
                         QString::fromUtf8(bluffskill::poker::toString(action.action)),
                         action.amount == 0 ? QString{} : QLocale().toString(action.amount), QLocale().toString(action.stackAfter));
                 }
@@ -436,7 +453,7 @@ private:
                             const auto seat = static_cast<int>(player.seat);
                             const auto winnings = winningsBySeat.value(seat);
                             if (winnings > 0 && !cursor.loggedPotWinnerSeats.contains(seat)) {
-                                appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Pot Won", QLocale().toString(winnings),
+                                appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", "Pot Won", QLocale().toString(winnings),
                                     QLocale().toString(player.stack), showdownHand(player));
                                 cursor.loggedPotWinnerSeats.insert(seat);
                                 cursor.loggedShowdownHandSeats.insert(seat);
@@ -449,7 +466,7 @@ private:
                         for (const auto& player : view.players) {
                             const auto winnings = winningsBySeat.value(static_cast<int>(player.seat));
                             if (winnings <= 0) continue;
-                            appendActionLogRow(QString::fromStdString(player.name), foldedRound, "Pot Folded", QLocale().toString(winnings),
+                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), foldedRound, "Pot Folded", QLocale().toString(winnings),
                                 QLocale().toString(player.stack));
                             cursor.loggedFoldedPot = true;
                             break;
@@ -458,7 +475,7 @@ private:
                     for (const auto& player : view.players) {
                         const auto seat = static_cast<int>(player.seat);
                         if (player.stack == 0 && cursor.handStartingStacks.value(seat) > 0 && !cursor.loggedBustedSeats.contains(seat)) {
-                            appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Busted Out", {}, QLocale().toString(player.stack),
+                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", "Busted Out", {}, QLocale().toString(player.stack),
                                 showdownHand(player));
                             cursor.loggedBustedSeats.insert(seat);
                             if (view.showdownOccurred) cursor.loggedShowdownHandSeats.insert(seat);
@@ -468,7 +485,7 @@ private:
                         for (const auto& player : view.players) {
                             const auto seat = static_cast<int>(player.seat);
                             if (player.folded || cursor.loggedShowdownHandSeats.contains(seat)) continue;
-                            appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Hand", {}, QLocale().toString(player.stack),
+                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", "Hand", {}, QLocale().toString(player.stack),
                                 showdownHand(player));
                             cursor.loggedShowdownHandSeats.insert(seat);
                         }
@@ -476,7 +493,7 @@ private:
                     const auto tableWinner = std::ranges::find_if(view.players, [](const auto& player) { return player.stack > 0; });
                     const auto remainingPlayers = std::count_if(view.players.begin(), view.players.end(), [](const auto& player) { return player.stack > 0; });
                     if (remainingPlayers == 1 && !cursor.loggedTableWinner) {
-                        appendActionLogRow(QString::fromStdString(tableWinner->name), "Game", "Table Winner", QLocale().toString(tableWinner->stack),
+                        appendActionLogRow(QString::fromStdString(tableWinner->name), kindFor(tableWinner->name), "Game", "Table Winner", QLocale().toString(tableWinner->stack),
                             QLocale().toString(tableWinner->stack));
                         cursor.loggedTableWinner = true;
                     }

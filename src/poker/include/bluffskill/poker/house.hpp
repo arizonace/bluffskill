@@ -74,7 +74,7 @@ private:
     [[nodiscard]] Competition& findCompetition(std::string_view name);
     [[nodiscard]] const Competition* findCompetition(std::string_view name) const;
     [[nodiscard]] CompetitionSummary summaryOf(const Competition& competition) const;
-    [[nodiscard]] std::string nextCompetitionName() const;
+    [[nodiscard]] std::string nextCompetitionName();
     [[nodiscard]] std::string nextReferencePlayerName(const Competition& competition);
     [[nodiscard]] std::size_t findTableIndex(const Competition& competition, std::string_view tableName) const;
     [[nodiscard]] Table& findTable(Competition& competition, std::string_view tableName);
@@ -87,6 +87,10 @@ private:
     std::mt19937_64 random_{std::random_device{}()};
     BlindSchedule blindSchedule_;
     ChipDenominations chipDenominations_;
+    std::vector<std::string> competitionNamePool_;
+    std::vector<std::string> referencePlayerNamePool_;
+    std::size_t nextCompetitionNameIndex_{0};
+    std::size_t nextReferencePlayerNameIndex_{0};
     std::vector<Competition> competitions_;
 };
 
