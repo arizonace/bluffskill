@@ -218,6 +218,30 @@ public:
         update();
     }
 
+    void beginAutomatedActionReplay(bool newHand) {
+        playerPotWinnings_.fill(0);
+        playerNetWinnings_.fill(0);
+        showdownOccurred_ = false;
+        if (newHand) {
+            street_ = "Preflop";
+            communityCards_.clear();
+            playerRoundCommitted_.fill(0);
+            playerActing_.fill(false);
+            pot_ = 0;
+            currentBet_ = 0;
+        }
+        update();
+    }
+
+    void showCommunityCards(QStringList cards) {
+        communityCards_ = std::move(cards);
+        playerRoundCommitted_.fill(0);
+        street_ = communityCards_.size() >= 5 ? "River"
+            : communityCards_.size() == 4 ? "Turn"
+            : communityCards_.size() == 3 ? "Flop" : "Preflop";
+        update();
+    }
+
     void setLocalPlayerName(QString name) {
         localPlayerName_ = std::move(name);
         localHoleCards_.clear();
@@ -1155,8 +1179,8 @@ private:
 
     void applyTableView(const QJsonObject& view) {
         const auto previousStreet = lastStreet_;
-        const auto deferShowdownForAutomatedActions = presentFinalAutomatedActions_
-            && view.value("street").toString() == "Showdown";
+        const auto deferShowdownForAutomatedActions = view.value("street").toString() == "Showdown"
+            && (presentFinalAutomatedActions_ || humanPlayerBusted(view));
         if (deferShowdownForAutomatedActions) {
             const auto presentingAutomatedActions = queueNewActionBoxes(view, previousStreet, true);
             presentFinalAutomatedActions_ = false;
@@ -1170,6 +1194,8 @@ private:
             presentFinalAutomatedActions_ = false;
         }
         pokerTable_->setTableView(view);
+        presentedCommunityCards_ = communityCards(view);
+        queuedCommunityCardCount_ = presentedCommunityCards_.size();
         localHoleCardsWidget_->setCards(view.value("street").toString() == "Showdown" ? QStringList{} : pokerTable_->localHoleCards());
         tableSequence_ = view.value("sequence").toInteger();
         lastStreet_ = view.value("street").toString();
@@ -1281,30 +1307,81 @@ private:
         return false;
     }
 
+    [[nodiscard]] static QString actionFingerprint(const QJsonObject& action) {
+        return QString::number(action.value("seat").toInteger()) + '\x1f' + action.value("player").toString() + '\x1f'
+            + action.value("street").toString() + '\x1f' + action.value("action").toString() + '\x1f'
+            + QString::number(action.value("amount").toInteger()) + '\x1f' + QString::number(action.value("stackAfter").toInteger());
+    }
+
+    [[nodiscard]] static QStringList communityCards(const QJsonObject& view) {
+        QStringList cards;
+        for (const auto& card : view.value("communityCards").toArray()) cards.append(card.toString());
+        return cards;
+    }
+
+    void queueCommunityCardReveal(const QStringList& cards, qsizetype count, const QString& street) {
+        if (queuedCommunityCardCount_ >= count || cards.size() < count) return;
+        QStringList revealed;
+        for (qsizetype index = 0; index < count; ++index) revealed.append(cards.at(index));
+        automatedActionQueue_.append({.type = AutomatedActionPresentation::Type::dealerReveal,
+            .player = "Dealer", .action = street, .communityCards = std::move(revealed)});
+        queuedCommunityCardCount_ = count;
+    }
+
+    void queueCommunityCardsThrough(const QStringList& cards, qsizetype count) {
+        if (count >= 3) queueCommunityCardReveal(cards, 3, "Flop");
+        if (count >= 4) queueCommunityCardReveal(cards, 4, "Turn");
+        if (count >= 5) queueCommunityCardReveal(cards, 5, "River");
+    }
+
     bool queueNewActionBoxes(const QJsonObject& view, const QString& previousStreet, bool preserveShowdownAutomatedActions = false) {
         const auto history = view.value("actionHistory").toArray();
         const auto players = view.value("players").toArray();
-        const auto newHand = history.size() < displayedActionHistoryCount_
+        QStringList fingerprints;
+        fingerprints.reserve(history.size());
+        for (const auto& item : history) fingerprints.append(actionFingerprint(item.toObject()));
+        const auto continues = displayedActionHistory_.size() <= fingerprints.size()
+            && std::equal(displayedActionHistory_.cbegin(), displayedActionHistory_.cend(), fingerprints.cbegin());
+        const auto newHand = !continues
             || (previousStreet == "Showdown" && view.value("street").toString() == "Preflop");
         if (newHand) {
             displayedActionHistoryCount_ = 0;
+            displayedActionHistory_.clear();
             automatedActionQueue_.clear();
             automatedActionTimer_.stop();
             pokerTable_->clearActionBoxes();
         }
         // A completed table normally begins its deal countdown immediately.
-        // A human fold or all-in may, however, cause the authoritative server
-        // to resolve several reference-player actions in one response. Replay
-        // those historical actions before revealing the resulting showdown.
+        // Once the local player has folded, gone all-in, or been eliminated,
+        // the authoritative server can resolve several reference-player actions
+        // in one response. Replay them before revealing the resulting showdown.
         if (view.value("street").toString() == "Showdown" && !preserveShowdownAutomatedActions) {
             displayedActionHistoryCount_ = history.size();
+            displayedActionHistory_ = std::move(fingerprints);
             automatedActionQueue_.clear();
             automatedActionTimer_.stop();
             pokerTable_->setPresentedActingSeat(0);
             return false;
         }
-        for (qsizetype index = displayedActionHistoryCount_; index < history.size(); ++index) {
+        const auto cards = communityCards(view);
+        if (preserveShowdownAutomatedActions) {
+            pokerTable_->beginAutomatedActionReplay(newHand);
+            if (newHand) {
+                presentedCommunityCards_.clear();
+                queuedCommunityCardCount_ = 0;
+            } else {
+                queuedCommunityCardCount_ = presentedCommunityCards_.size();
+            }
+        }
+        const auto firstUnpresentedAction = newHand ? qsizetype{0} : displayedActionHistoryCount_;
+        for (qsizetype index = firstUnpresentedAction; index < history.size(); ++index) {
             const auto action = history.at(index).toObject();
+            if (preserveShowdownAutomatedActions) {
+                const auto street = action.value("street").toString();
+                if (street == "Flop") queueCommunityCardsThrough(cards, 3);
+                else if (street == "Turn") queueCommunityCardsThrough(cards, 4);
+                else if (street == "River") queueCommunityCardsThrough(cards, 5);
+            }
             const auto actionName = action.value("action").toString();
             if (actionName == "Small Blind" || actionName == "Big Blind") continue;
             const auto seat = static_cast<std::size_t>(action.value("seat").toInt());
@@ -1315,10 +1392,13 @@ private:
             });
             const auto reference = player != players.end()
                 && player->toObject().value("kind").toString() == "Reference";
-            if (reference) automatedActionQueue_.append({.seat = seat, .player = playerName, .action = actionName, .amount = amount});
+            if (reference) automatedActionQueue_.append({.type = AutomatedActionPresentation::Type::playerAction,
+                .seat = seat, .player = playerName, .action = actionName, .amount = amount});
             else pokerTable_->showLastAction(seat, actionName, amount);
         }
+        if (preserveShowdownAutomatedActions) queueCommunityCardsThrough(cards, cards.size());
         displayedActionHistoryCount_ = history.size();
+        displayedActionHistory_ = std::move(fingerprints);
         if (automatedActionTimer_.isActive() || automatedActionQueue_.isEmpty()) return automatedActionTimer_.isActive();
         presentNextAutomatedAction();
         return true;
@@ -1332,10 +1412,17 @@ private:
             return;
         }
         const auto action = automatedActionQueue_.takeFirst();
-        pokerTable_->setPresentedActingSeat(action.seat);
-        pokerTable_->showLastAction(action.seat, action.action, action.amount);
-        statusBar()->showMessage(action.player + " " + action.action.toLower()
-            + (action.amount > 0 ? " " + QLocale().toString(action.amount) : "") + ".");
+        if (action.type == AutomatedActionPresentation::Type::dealerReveal) {
+            pokerTable_->setPresentedActingSeat(0);
+            pokerTable_->showCommunityCards(action.communityCards);
+            presentedCommunityCards_ = action.communityCards;
+            statusBar()->showMessage("Dealer deals the " + action.action.toLower() + ".");
+        } else {
+            pokerTable_->setPresentedActingSeat(action.seat);
+            pokerTable_->showLastAction(action.seat, action.action, action.amount);
+            statusBar()->showMessage(action.player + " " + action.action.toLower()
+                + (action.amount > 0 ? " " + QLocale().toString(action.amount) : "") + ".");
+        }
         automatedActionTimer_.start(settings_.automatedPlayerDelayMilliseconds);
     }
 
@@ -1604,6 +1691,9 @@ private:
         stopNextDealCountdown();
         stopTurnCountdown();
         displayedActionHistoryCount_ = 0;
+        displayedActionHistory_.clear();
+        presentedCommunityCards_.clear();
+        queuedCommunityCardCount_ = 0;
         automatedActionQueue_.clear();
         automatedActionTimer_.stop();
         pokerTable_->clearActionBoxes();
@@ -1757,10 +1847,9 @@ private:
             : bluffskill::client::HumanAction::fold;
         humanPlayer_->selectAction(humanAction);
         if (competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
-        const auto isAllInBetOrRaise = (humanAction == bluffskill::client::HumanAction::bet
-            || humanAction == bluffskill::client::HumanAction::raise)
-            && wagerMaximum_ > 0 && wagerAmount() >= wagerMaximum_;
-        presentFinalAutomatedActions_ = humanAction == bluffskill::client::HumanAction::fold || isAllInBetOrRaise;
+        // If this command completes the hand, preserve its action history so
+        // the local action is shown before the queued reference-player actions.
+        presentFinalAutomatedActions_ = true;
         const auto amount = humanAction == bluffskill::client::HumanAction::bet || humanAction == bluffskill::client::HumanAction::raise
             ? wagerExistingCommitment_ + wagerAmount() : 0;
         setActionControlsEnabled(false);
@@ -1807,6 +1896,9 @@ private:
         tableSequence_ = 0;
         lastShowdownSequence_ = -1;
         displayedActionHistoryCount_ = 0;
+        displayedActionHistory_.clear();
+        presentedCommunityCards_.clear();
+        queuedCommunityCardCount_ = 0;
         automatedActionQueue_.clear();
         automatedActionTimer_.stop();
         presentFinalAutomatedActions_ = false;
@@ -1829,10 +1921,14 @@ private:
     enum class PauseReason { none, turn, deal };
 
     struct AutomatedActionPresentation {
+        enum class Type { playerAction, dealerReveal };
+
+        Type type{Type::playerAction};
         std::size_t seat{0};
         QString player;
         QString action;
         qint64 amount{0};
+        QStringList communityCards;
     };
 
     bluffskill::app_config::Settings settings_;
@@ -1848,6 +1944,9 @@ private:
     qint64 turnSequence_{-1};
     QString lastStreet_;
     qsizetype displayedActionHistoryCount_{};
+    QStringList displayedActionHistory_;
+    QStringList presentedCommunityCards_;
+    qsizetype queuedCommunityCardCount_{};
     int nextDealMilliseconds_{};
     int turnSeconds_{};
     bool connected_{};

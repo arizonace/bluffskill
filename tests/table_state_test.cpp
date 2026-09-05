@@ -51,6 +51,7 @@ int main() {
 
     table.submitAction("Alice", Action::call, 0, aliceView.eventSequence);
     const auto botOneTurn = table.viewFor("BotOne");
+    assert(botOneTurn.actionHistory.back().action == Action::call);
     assert(botOneTurn.actionHistory.back().stackAfter == 0);
     assert(botOneTurn.actingSeat == 2);
     assert(botOneTurn.legalActions && botOneTurn.legalActions->raise);
@@ -124,6 +125,10 @@ int main() {
     assert(noAllInView.pots.size() == 1);
     assert(noAllInView.pots[0].amount == 600);
     for (const auto& player : noAllInView.players) assert(player.roundCommitted == 0);
+    auto checkView = noAllInSidePot.viewFor("CallOne");
+    assert(checkView.legalActions && checkView.legalActions->check);
+    noAllInSidePot.submitAction("CallOne", Action::check, 0, checkView.eventSequence);
+    assert(noAllInSidePot.viewFor().actionHistory.back().action == Action::check);
 
     Table rotation("Rotation", 3, 500);
     rotation.seatPlayer("One", PlayerKind::api, 1, 500);

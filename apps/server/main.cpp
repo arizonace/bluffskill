@@ -295,16 +295,16 @@ private:
         return pokerNotation(std::move(cards));
     }
 
-    void appendCommunityCardLogRows(const bluffskill::poker::TableView& view, ActionLogCursor& cursor) {
-        if (cursor.loggedCommunityCards == 0 && view.communityCards.size() >= 3) {
+    void appendCommunityCardLogRows(const bluffskill::poker::TableView& view, ActionLogCursor& cursor, std::size_t visibleCards) {
+        if (cursor.loggedCommunityCards == 0 && visibleCards >= 3 && view.communityCards.size() >= 3) {
             appendActionLogRow("Dealer", {}, "Flop", "Deal", {}, {}, communityCards(view, 0, 3));
             cursor.loggedCommunityCards = 3;
         }
-        if (cursor.loggedCommunityCards == 3 && view.communityCards.size() >= 4) {
+        if (cursor.loggedCommunityCards == 3 && visibleCards >= 4 && view.communityCards.size() >= 4) {
             appendActionLogRow("Dealer", {}, "Turn", "Deal", {}, {}, communityCards(view, 3, 1));
             cursor.loggedCommunityCards = 4;
         }
-        if (cursor.loggedCommunityCards == 4 && view.communityCards.size() >= 5) {
+        if (cursor.loggedCommunityCards == 4 && visibleCards >= 5 && view.communityCards.size() >= 5) {
             appendActionLogRow("Dealer", {}, "River", "Deal", {}, {}, communityCards(view, 4, 1));
             cursor.loggedCommunityCards = 5;
         }
@@ -512,24 +512,15 @@ private:
                 }
                 for (qsizetype index = cursor.history.size(); index < view.actionHistory.size(); ++index) {
                     const auto& action = view.actionHistory[static_cast<std::size_t>(index)];
-                    bool preflopWasUnraised = true;
-                    for (qsizetype priorIndex = 0; priorIndex < index; ++priorIndex) {
-                        const auto& priorAction = view.actionHistory[static_cast<std::size_t>(priorIndex)];
-                        if (priorAction.street == bluffskill::poker::Street::preflop
-                            && priorAction.action == bluffskill::poker::Action::raise) {
-                            preflopWasUnraised = false;
-                            break;
-                        }
-                    }
-                    const auto completesBigBlind = action.action == bluffskill::poker::Action::call
-                        && action.street == bluffskill::poker::Street::preflop
-                        && view.smallBlindSeat && action.seat == *view.smallBlindSeat
-                        && action.amount == view.bigBlind - view.smallBlind && preflopWasUnraised;
+                    const auto visibleCards = action.street == bluffskill::poker::Street::flop ? std::size_t{3}
+                        : action.street == bluffskill::poker::Street::turn ? std::size_t{4}
+                        : action.street == bluffskill::poker::Street::river ? std::size_t{5} : std::size_t{0};
+                    appendCommunityCardLogRows(view, cursor, visibleCards);
                     appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
-                        completesBigBlind ? QStringLiteral("Complete") : QString::fromUtf8(bluffskill::poker::toString(action.action)),
+                        QString::fromUtf8(bluffskill::poker::toString(action.action)),
                         action.amount == 0 ? QString{} : QLocale().toString(action.amount), QLocale().toString(action.stackAfter));
                 }
-                appendCommunityCardLogRows(view, cursor);
+                appendCommunityCardLogRows(view, cursor, view.communityCards.size());
                 if (view.street == bluffskill::poker::Street::showdown) {
                     QHash<int, qint64> winningsBySeat;
                     for (const auto& payout : view.payouts) {
