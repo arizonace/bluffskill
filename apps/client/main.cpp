@@ -1641,13 +1641,20 @@ private:
         pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName);
         newGameAction_->setEnabled(false);
         const auto humanSeat = QRandomGenerator::global()->bounded(1, defaultTableSeats + 1);
+        const auto referenceTypes = randomReferencePlayerTypes(defaultTableSeats - 1);
+        QVector<QString> referencesBeforeHuman;
+        QVector<QString> referencesAfterHuman;
+        for (qsizetype index = 0; index < referenceTypes.size(); ++index) {
+            (index < humanSeat - 1 ? referencesBeforeHuman : referencesAfterHuman).append(referenceTypes[index]);
+        }
         statusBar()->showMessage("Creating a nine-reference-player tournament…");
         auto* reply = postJson("/v1/competitions", QJsonObject{
             {"flavor", "NoLimitTexasHoldEm"},
             {"maximumPlayers", defaultTableSeats},
             {"startingStack", 7000},
         });
-        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, humanSeat] {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, humanSeat,
+            referencesBeforeHuman = std::move(referencesBeforeHuman), referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const auto competition = QJsonDocument::fromJson(reply->readAll()).object();
             const auto success = reply->error() == QNetworkReply::NoError && status == 201;
@@ -1660,20 +1667,38 @@ private:
                 return;
             }
             const auto competitionName = competition.value("name").toString();
-            addReferencePlayers(competitionName, attempt, humanSeat - 1, [this, competitionName, attempt, humanSeat] {
-                attachHumanPlayer(competitionName, "Red", attempt, humanSeat);
-            });
+            addReferencePlayers(competitionName, attempt, std::move(referencesBeforeHuman),
+                [this, competitionName, attempt, humanSeat, referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
+                    attachHumanPlayer(competitionName, "Red", attempt, humanSeat, std::move(referencesAfterHuman));
+                });
         });
     }
 
-    void addReferencePlayers(const QString& competitionName, std::uint64_t attempt, int count, std::function<void()> onSuccess) {
-        if (count == 0) {
+    [[nodiscard]] static QVector<QString> randomReferencePlayerTypes(int count) {
+        QVector<QString> types;
+        types.reserve(count);
+        for (int index = 0; index < count; ++index) {
+            types.append(QRandomGenerator::global()->bounded(2) == 0 ? "Leo" : "Virgo");
+        }
+        if (count > 1) {
+            const auto hasLeo = std::ranges::any_of(types, [](const QString& type) { return type == "Leo"; });
+            const auto hasVirgo = std::ranges::any_of(types, [](const QString& type) { return type == "Virgo"; });
+            if (!hasLeo) types[QRandomGenerator::global()->bounded(count)] = "Leo";
+            if (!hasVirgo) types[QRandomGenerator::global()->bounded(count)] = "Virgo";
+        }
+        return types;
+    }
+
+    void addReferencePlayers(const QString& competitionName, std::uint64_t attempt, QVector<QString> types, std::function<void()> onSuccess) {
+        if (types.isEmpty()) {
             onSuccess();
             return;
         }
+        const auto type = types.takeFirst();
         const auto path = "/v1/competitions/" + competitionName + "/reference-players";
-        auto* reply = postJson(path, QJsonObject{{"count", count}});
-        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt, onSuccess = std::move(onSuccess)] {
+        auto* reply = postJson(path, QJsonObject{{"count", 1}, {"type", type}});
+        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt,
+            types = std::move(types), onSuccess = std::move(onSuccess)]() mutable {
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const auto success = reply->error() == QNetworkReply::NoError && status == 201;
             release(reply);
@@ -1685,14 +1710,16 @@ private:
                 refreshCompetitions(competitionName);
                 return;
             }
-            onSuccess();
+            addReferencePlayers(competitionName, attempt, std::move(types), std::move(onSuccess));
         });
     }
 
-    void attachHumanPlayer(const QString& competitionName, const QString& tableName, std::uint64_t attempt, int humanSeat) {
+    void attachHumanPlayer(const QString& competitionName, const QString& tableName, std::uint64_t attempt, int humanSeat,
+        QVector<QString> referencesAfterHuman) {
         if (!pendingHumanPlayer_) return;
         auto* reply = track(pendingHumanPlayer_->attachToTable(network_, serverUrl_, competitionName, tableName));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt, humanSeat] {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, competitionName, attempt, humanSeat,
+            referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
             const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const auto response = QJsonDocument::fromJson(reply->readAll()).object();
             const auto success = reply->error() == QNetworkReply::NoError && status == 201;
@@ -1710,7 +1737,7 @@ private:
             pokerTable_->setLocalPlayerName(humanPlayer_->apiPlayerName());
             setActionControlsEnabled(false);
             statusBar()->showMessage("You are " + humanPlayer_->apiPlayerName() + ". Seating remaining reference players…");
-            addReferencePlayers(competitionName, attempt, defaultTableSeats - humanSeat, [this, competitionName] {
+            addReferencePlayers(competitionName, attempt, std::move(referencesAfterHuman), [this, competitionName] {
                 newGameAction_->setEnabled(true);
                 statusBar()->showMessage("You are " + humanPlayer_->apiPlayerName() + ". Retrieving your private table view…");
                 statusBar()->showMessage("Created " + competitionName + " with nine reference players and " + humanPlayer_->apiPlayerName() + ".");
