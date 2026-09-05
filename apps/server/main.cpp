@@ -6,6 +6,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -27,9 +28,11 @@
 #include <QLocale>
 #include <QPlainTextEdit>
 #include <QSet>
+#include <QSettings>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QStandardPaths>
 #include <QTcpServer>
 #include <QTableWidget>
 #include <QTreeWidget>
@@ -279,6 +282,23 @@ private:
         return path;
     }
 
+    [[nodiscard]] static QString exportDirectory() {
+        QSettings settings;
+        const auto savedDirectory = settings.value("server/lastExportDirectory").toString();
+        if (!savedDirectory.isEmpty() && QDir(savedDirectory).exists()) return savedDirectory;
+        const auto downloads = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+        return downloads.isEmpty() ? QDir::homePath() : downloads;
+    }
+
+    [[nodiscard]] static QString suggestedExportPath(const QString& fileName) {
+        return QDir(exportDirectory()).filePath(fileName);
+    }
+
+    static void rememberExportDirectory(const QString& path) {
+        QSettings settings;
+        settings.setValue("server/lastExportDirectory", QFileInfo(path).absolutePath());
+    }
+
     [[nodiscard]] QJsonArray actionLogJson(const QString& tableKey = {}) const {
         QJsonArray actions;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
@@ -313,7 +333,8 @@ private:
     }
 
     bool writeFile(const QString& path, const QByteArray& contents, const QString& description) {
-        QFile file(path);
+        const auto destination = path;
+        QFile file(destination);
         if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             QMessageBox::warning(this, "Save failed", "Could not save " + description + ".\n" + file.errorString());
             return false;
@@ -322,7 +343,8 @@ private:
             QMessageBox::warning(this, "Save failed", "Could not save " + description + ".\n" + file.errorString());
             return false;
         }
-        statusBar()->showMessage("Saved " + description + " to " + path, 5'000);
+        rememberExportDirectory(destination);
+        statusBar()->showMessage("Saved " + description + " to " + destination, 5'000);
         return true;
     }
 
@@ -348,7 +370,7 @@ private:
 
     void saveActionLog() {
         QString selectedFilter;
-        const auto path = QFileDialog::getSaveFileName(this, "Save Action Log", "BluffSkill-action-log",
+        const auto path = QFileDialog::getSaveFileName(this, "Save Action Log", suggestedExportPath("BluffSkill-action-log"),
             "CSV (*.csv);;JSON (*.json)", &selectedFilter);
         if (path.isEmpty()) return;
         if (selectedFilter.startsWith("JSON")) saveActionLogJson(path);
@@ -356,7 +378,7 @@ private:
     }
 
     void saveTableAsJson(const QString& competitionName, const QString& tableName) {
-        const auto path = QFileDialog::getSaveFileName(this, "Save Table as JSON", tableName + ".json", "JSON (*.json)");
+        const auto path = QFileDialog::getSaveFileName(this, "Save Table as JSON", suggestedExportPath(tableName + ".json"), "JSON (*.json)");
         if (path.isEmpty()) return;
         const auto table = house_.tableView(competitionName.toStdString(), tableName.toStdString());
         writeFile(withSuffix(path, "json"), QJsonDocument(tableViewJson(table)).toJson(QJsonDocument::Indented), "Table JSON");
@@ -375,7 +397,7 @@ private:
         const auto* selected = menu.exec(tree_->viewport()->mapToGlobal(position));
         if (selected == saveTableAction) saveTableAsJson(competitionName, tableName);
         if (selected == saveLogAction) {
-            const auto path = QFileDialog::getSaveFileName(this, "Save Action Log as CSV", tableName + "-action-log.csv", "CSV (*.csv)");
+            const auto path = QFileDialog::getSaveFileName(this, "Save Action Log as CSV", suggestedExportPath(tableName + "-action-log.csv"), "CSV (*.csv)");
             if (!path.isEmpty()) saveActionLogCsv(path, competitionName + '/' + tableName);
         }
     }
