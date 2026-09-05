@@ -146,6 +146,7 @@ public:
     }
 
     void setTableView(const QJsonObject& table) {
+        const auto previousStreet = street_;
         hasTableState_ = true;
         playerNames_.fill({});
         playerStacks_.fill(0);
@@ -178,6 +179,7 @@ public:
             }
         }
         street_ = table.value("street").toString();
+        if (!previousStreet.isEmpty() && previousStreet != street_) clearActionBoxes();
         pot_ = 0;
         for (const auto& item : table.value("pots").toArray()) pot_ += item.toObject().value("amount").toInteger();
         if (street_ != "Showdown") {
@@ -234,11 +236,13 @@ public:
     }
 
     void showCommunityCards(QStringList cards) {
+        const auto previousStreet = street_;
         communityCards_ = std::move(cards);
         playerRoundCommitted_.fill(0);
         street_ = communityCards_.size() >= 5 ? "River"
             : communityCards_.size() == 4 ? "Turn"
             : communityCards_.size() == 3 ? "Flop" : "Preflop";
+        if (previousStreet != street_) clearActionBoxes();
         update();
     }
 
@@ -304,7 +308,8 @@ protected:
             const auto point = seats[i];
             const auto busted = hasTableState_ && !playerNames_[i].isEmpty() && playerStacks_[i] == 0
                 && (street_ == "Showdown" || playerCommitted_[i] == 0);
-            painter.setBrush(busted ? QColor("#454545") : QColor("#162D24"));
+            const auto folded = playerFolded_[i] && !busted;
+            painter.setBrush(busted ? QColor("#777777") : folded ? QColor("#454545") : QColor("#162D24"));
             const auto localPlayer = !localPlayerName_.isEmpty() && playerNames_[i] == localPlayerName_;
             painter.setPen(QPen(localPlayer ? QColor("#F6D365") : Qt::white, localPlayer ? 3 : 1));
             painter.drawEllipse(point, playerRadius, playerRadius);
@@ -356,7 +361,9 @@ protected:
             const auto actionDistance = 45.0 + std::abs(actionDirection.x()) * 31.0 + std::abs(actionDirection.y()) * 19.0;
             const auto winningsDistance = 45.0 + std::abs(actionDirection.x()) * 35.0 + std::abs(actionDirection.y()) * 20.0;
             drawActionBox(painter, point + actionDirection * actionDistance, playerLastActions_[i]);
-            drawWinningsBox(painter, point - actionDirection * winningsDistance, playerPotWinnings_[i], playerNetWinnings_[i]);
+            if (street_ == "Showdown") {
+                drawResultBox(painter, point - actionDirection * winningsDistance, playerPotWinnings_[i], playerNetWinnings_[i]);
+            }
             if (showdownOccurred_ && (!playerFolded_[i] || playerNames_[i] == localPlayerName_) && !playerHoleCards_[i].isEmpty()) {
                 drawPlayerCards(painter, playerHoleCards_[i], playerShowdownDescriptions_[i], point, inward,
                     isSouthSeat(i), 38, 52);
@@ -488,17 +495,19 @@ private:
         painter.restore();
     }
 
-    static void drawWinningsBox(QPainter& painter, QPointF center, qint64 winnings, qint64 net) {
-        if (winnings <= 0) return;
+    static void drawResultBox(QPainter& painter, QPointF center, qint64 winnings, qint64 net) {
+        if (net == 0) return;
         const QRectF rect(center.x() - 35, center.y() - 20, 70, 40);
         painter.save();
-        painter.setPen(QPen(QColor("#4C3B00"), 1));
-        painter.setBrush(QColor("#F5E400"));
+        const auto won = net > 0;
+        painter.setPen(QPen(won ? QColor("#4C3B00") : QColor("#5B1717"), 1));
+        painter.setBrush(won ? QColor("#F5E400") : QColor("#E55A5A"));
         painter.drawRoundedRect(rect, 14, 14);
         painter.setPen(QColor("#171717"));
         painter.setFont(QFont("Helvetica", 10, QFont::Bold));
-        const auto netText = QString(net >= 0 ? "+" : "") + chips(net);
-        painter.drawText(rect.adjusted(3, 2, -3, -2), Qt::AlignCenter | Qt::TextWordWrap, chips(winnings) + '\n' + netText);
+        const auto text = won ? chips(winnings) + '\n' + "+" + chips(net)
+            : "Lost\n-" + chips(-net);
+        painter.drawText(rect.adjusted(3, 2, -3, -2), Qt::AlignCenter | Qt::TextWordWrap, text);
         painter.restore();
     }
 

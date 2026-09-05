@@ -496,7 +496,7 @@ private:
                     if (cursor.lastBigBlind > 0 && bigBlind > cursor.lastBigBlind) {
                         appendActionLogRow(dealerName, dealerKind, "Deal", "Blinds Up", QLocale().toString(bigBlind), dealerStack);
                     }
-                    appendActionLogRow("Dealer", {}, "Deal", "Deal", {}, dealerStack);
+                    appendActionLogRow(dealerName, dealerKind, "Deal", "Deal", {}, dealerStack);
                     cursor.lastBigBlind = bigBlind;
                     cursor.history.clear();
                     cursor.handStartingStacks.clear();
