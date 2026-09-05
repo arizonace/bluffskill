@@ -94,6 +94,7 @@ struct ActionView {
     Street street{Street::waiting};
     Action action{Action::check};
     Chips amount{0};
+    Chips stackAfter{0}; // Player's remaining stack immediately after the action.
 };
 
 struct TableView {

@@ -32,8 +32,10 @@ int main() {
     assert(publicView.actionHistory.size() == 2);
     assert(publicView.actionHistory[0].action == Action::smallBlind);
     assert(publicView.actionHistory[0].amount == 25);
+    assert(publicView.actionHistory[0].stackAfter == 175);
     assert(publicView.actionHistory[1].action == Action::bigBlind);
     assert(publicView.actionHistory[1].amount == 50);
+    assert(publicView.actionHistory[1].stackAfter == 150);
     assert(publicView.players.front().holeCards.empty());
     assert(aliceView.players.front().holeCards.size() == 2);
     assert(aliceView.legalActions && aliceView.legalActions->call);
@@ -49,6 +51,7 @@ int main() {
 
     table.submitAction("Alice", Action::call, 0, aliceView.eventSequence);
     const auto botOneTurn = table.viewFor("BotOne");
+    assert(botOneTurn.actionHistory.back().stackAfter == 0);
     assert(botOneTurn.actingSeat == 2);
     assert(botOneTurn.legalActions && botOneTurn.legalActions->raise);
     assert((botOneTurn.chipDenominations == ChipDenominations{25, 100, 500, 1000}));

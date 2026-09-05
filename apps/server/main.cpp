@@ -143,8 +143,8 @@ public:
         log_ = new QPlainTextEdit(splitter);
         log_->setReadOnly(true);
         actionLog_ = new QTableWidget(splitter);
-        actionLog_->setColumnCount(4);
-        actionLog_->setHorizontalHeaderLabels({"Player", "Round", "Action", "Value"});
+        actionLog_->setColumnCount(5);
+        actionLog_->setHorizontalHeaderLabels({"Player", "Round", "Action", "Value", "Stack"});
         actionLog_->horizontalHeader()->setStretchLastSection(true);
         actionLog_->verticalHeader()->setVisible(false);
         actionLog_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -219,13 +219,14 @@ private:
         qint64 lastBigBlind{0};
     };
 
-    void appendActionLogRow(const QString& player, const QString& round, const QString& action, const QString& value = {}) {
+    void appendActionLogRow(const QString& player, const QString& round, const QString& action, const QString& value = {}, const QString& stack = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
         actionLog_->setItem(row, 0, new QTableWidgetItem(player));
         actionLog_->setItem(row, 1, new QTableWidgetItem(round));
         actionLog_->setItem(row, 2, new QTableWidgetItem(action));
         actionLog_->setItem(row, 3, new QTableWidgetItem(value));
+        actionLog_->setItem(row, 4, new QTableWidgetItem(stack));
         actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
     }
 
@@ -254,6 +255,8 @@ private:
                         return seat && player.seat == *seat;
                     });
                     const auto dealerName = dealer == view.players.end() ? QString{} : QString::fromStdString(dealer->name);
+                    const auto dealerStack = dealer == view.players.end() ? QString{}
+                        : QLocale().toString(static_cast<qint64>(dealer->stack + dealer->committed));
                     const auto bigBlind = static_cast<qint64>(view.bigBlind);
                     const auto gameStarted = view.roundsPlayed == 1;
                     if (gameStarted) {
@@ -262,9 +265,9 @@ private:
                         cursor.loggedTableWinner = false;
                     }
                     if (cursor.lastBigBlind > 0 && bigBlind > cursor.lastBigBlind) {
-                        appendActionLogRow(dealerName, "Deal", "Blinds Up", QLocale().toString(bigBlind));
+                        appendActionLogRow(dealerName, "Deal", "Blinds Up", QLocale().toString(bigBlind), dealerStack);
                     }
-                    appendActionLogRow(dealerName, "Deal", "Deal");
+                    appendActionLogRow(dealerName, "Deal", "Deal", {}, dealerStack);
                     cursor.lastBigBlind = bigBlind;
                     cursor.history.clear();
                     cursor.handStartingStacks.clear();
@@ -280,7 +283,7 @@ private:
                     const auto& action = view.actionHistory[static_cast<std::size_t>(index)];
                     appendActionLogRow(QString::fromStdString(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
                         QString::fromUtf8(bluffskill::poker::toString(action.action)),
-                        action.amount == 0 ? QString{} : QLocale().toString(action.amount));
+                        action.amount == 0 ? QString{} : QLocale().toString(action.amount), QLocale().toString(action.stackAfter));
                 }
                 if (view.street == bluffskill::poker::Street::showdown) {
                     QHash<int, qint64> winningsBySeat;
@@ -294,7 +297,8 @@ private:
                             const auto seat = static_cast<int>(player.seat);
                             const auto winnings = winningsBySeat.value(seat);
                             if (winnings > 0 && !cursor.loggedPotWinnerSeats.contains(seat)) {
-                                appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Pot Won", QLocale().toString(winnings));
+                                appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Pot Won", QLocale().toString(winnings),
+                                    QLocale().toString(player.stack));
                                 cursor.loggedPotWinnerSeats.insert(seat);
                             }
                         }
@@ -305,7 +309,8 @@ private:
                         for (const auto& player : view.players) {
                             const auto winnings = winningsBySeat.value(static_cast<int>(player.seat));
                             if (winnings <= 0) continue;
-                            appendActionLogRow(QString::fromStdString(player.name), foldedRound, "Pot Folded", QLocale().toString(winnings));
+                            appendActionLogRow(QString::fromStdString(player.name), foldedRound, "Pot Folded", QLocale().toString(winnings),
+                                QLocale().toString(player.stack));
                             cursor.loggedFoldedPot = true;
                             break;
                         }
@@ -313,14 +318,15 @@ private:
                     for (const auto& player : view.players) {
                         const auto seat = static_cast<int>(player.seat);
                         if (player.stack == 0 && cursor.handStartingStacks.value(seat) > 0 && !cursor.loggedBustedSeats.contains(seat)) {
-                            appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Busted Out");
+                            appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Busted Out", {}, QLocale().toString(player.stack));
                             cursor.loggedBustedSeats.insert(seat);
                         }
                     }
                     const auto tableWinner = std::ranges::find_if(view.players, [](const auto& player) { return player.stack > 0; });
                     const auto remainingPlayers = std::count_if(view.players.begin(), view.players.end(), [](const auto& player) { return player.stack > 0; });
                     if (remainingPlayers == 1 && !cursor.loggedTableWinner) {
-                        appendActionLogRow(QString::fromStdString(tableWinner->name), "Game", "Table Winner", QLocale().toString(tableWinner->stack));
+                        appendActionLogRow(QString::fromStdString(tableWinner->name), "Game", "Table Winner", QLocale().toString(tableWinner->stack),
+                            QLocale().toString(tableWinner->stack));
                         cursor.loggedTableWinner = true;
                     }
                 }

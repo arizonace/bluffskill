@@ -259,7 +259,8 @@ void Table::postBlind(Seat& seat, Chips amount, Action action) {
     seat.handCommitted += paid;
     seat.roundCommitted += paid;
     seat.allIn = seat.stack == 0;
-    history_.push_back({.player = seat.name, .seat = seat.number, .street = Street::preflop, .action = action, .amount = paid});
+    history_.push_back({.player = seat.name, .seat = seat.number, .street = Street::preflop, .action = action, .amount = paid,
+        .stackAfter = seat.stack});
 }
 
 void Table::setBlindSchedule(BlindSchedule blindSchedule) {
@@ -695,7 +696,8 @@ void Table::submitAction(std::string_view playerName, Action action, Chips amoun
         break;
     }
 
-    history_.push_back({.player = actor.name, .seat = actor.number, .street = street_, .action = action, .amount = committed});
+    history_.push_back({.player = actor.name, .seat = actor.number, .street = street_, .action = action, .amount = committed,
+        .stackAfter = actor.stack});
     ++eventSequence_;
     advanceAfterAction(actor, fullRaise);
 }
