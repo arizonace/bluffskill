@@ -22,6 +22,8 @@ Qt client / CLI / reference bot
 
 `src/cards` is portable C++ with no Qt dependency and can serve bridge, blackjack, or another card game. `src/poker` depends on that library, remains portable C++, and will contain all poker rules. Qt lives only at the application edge. Network code must translate JSON to typed commands; it must never mutate a `Table` directly.
 
+Reference players are in-process `ReferencePlayerController` implementations. The controller interface exposes a player type, private diagnostic parameters for the server console, and a decision method that consumes only that controller's private `TableView`. Leo and Virgo are separate implementations and may occupy the same table. Adding another type requires a new controller implementation plus its server factory registration; it does not change poker rules or adapters.
+
 ## Runtime responsibilities
 
 | Layer | Owns | Does not own |

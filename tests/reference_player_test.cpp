@@ -1,5 +1,6 @@
 #include "bluffskill/poker/house.hpp"
-#include "bluffskill/poker/reference_player.hpp"
+#include "bluffskill/poker/leo_reference_player.hpp"
+#include "bluffskill/poker/virgo_reference_player.hpp"
 
 #include <cassert>
 
@@ -24,20 +25,35 @@ int main() {
 
     const auto aces = privateTurn("Bold", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
     std::mt19937_64 stableRandom{7};
-    ReferencePlayer bold{"Bold", {.riskTolerance = 1.0, .optimism = 1.0, .variability = 0.0}};
+    LeoReferencePlayer bold{"Bold", {.riskTolerance = 1.0, .optimism = 1.0, .variability = 0.0}};
     const auto boldDecision = bold.chooseResponse(aces, stableRandom);
     assert(boldDecision.action == Action::raise);
     assert(boldDecision.amount >= 200 && boldDecision.amount <= 1000);
     assert(boldDecision.amount % 25 == 0);
 
     std::mt19937_64 cautiousRandom{7};
-    ReferencePlayer cautious{"Bold", {.riskTolerance = 0.0, .optimism = 0.0, .variability = 0.0}};
+    LeoReferencePlayer cautious{"Bold", {.riskTolerance = 0.0, .optimism = 0.0, .variability = 0.0}};
     const auto cautiousDecision = cautious.chooseResponse(aces, cautiousRandom);
     assert(cautiousDecision.action == Action::call);
 
     try {
-        ReferencePlayer invalid{"Invalid", {.riskTolerance = -0.01, .optimism = 0.5, .variability = 0.5}};
+        LeoReferencePlayer invalid{"Invalid", {.riskTolerance = -0.01, .optimism = 0.5, .variability = 0.5}};
         assert(false && "invalid profiles must be rejected");
+    } catch (const std::invalid_argument&) {
+    }
+
+    VirgoReferencePlayer virgo{"Virgo", {.curiosity = 1.0, .hope = 1.0, .empathy = 0.5, .longevity = 0.5}};
+    const auto virgoView = privateTurn("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
+    std::mt19937_64 virgoRandom{7};
+    const auto virgoDecision = virgo.chooseResponse(virgoView, virgoRandom);
+    assert(virgoDecision.action == Action::call || virgoDecision.action == Action::raise || virgoDecision.action == Action::fold);
+    if (virgoDecision.action == Action::raise) assert(virgoDecision.amount >= 200 && virgoDecision.amount <= 1000 && virgoDecision.amount % 25 == 0);
+    assert(virgo.referenceType() == ReferencePlayerType::virgo);
+    assert(virgo.parameters().size() == 4);
+
+    try {
+        VirgoReferencePlayer invalid{"Invalid", {.curiosity = 0.5, .hope = 0.5, .empathy = 1.1, .longevity = 0.5}};
+        assert(false && "invalid Virgo profiles must be rejected");
     } catch (const std::invalid_argument&) {
     }
 
@@ -45,17 +61,28 @@ int main() {
     const auto competition = house.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7000});
     const auto populated = house.createReferencePlayers(competition.name, 2);
     assert(populated.tables.front().players.size() == 2);
-    const auto seated = house.createApiPlayer(competition.name, "Red", "Human");
+    assert(populated.tables.front().players.front().player.referenceType == ReferencePlayerType::leo);
+    const auto mixed = house.createReferencePlayers(competition.name, 1, ReferencePlayerType::virgo);
+    assert(mixed.tables.front().players.back().player.referenceType == ReferencePlayerType::virgo);
+    const auto virgoInspection = house.referencePlayerInspection(competition.name, "Red", mixed.tables.front().players.back().player.name);
+    assert(virgoInspection && virgoInspection->type == ReferencePlayerType::virgo);
+    assert(virgoInspection->parameters.size() == 4);
+    assert(mixed.tables.front().players.size() == 3);
+    // This separate table retains the original two-reference-player flow.
+    House activeHouse;
+    const auto activeCompetition = activeHouse.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7000});
+    [[maybe_unused]] const auto activeReferences = activeHouse.createReferencePlayers(activeCompetition.name, 2);
+    const auto seated = activeHouse.createApiPlayer(activeCompetition.name, "Red", "Human");
     assert(seated.tables.front().players.size() == 3);
-    auto view = house.tableView(competition.name, "Red", "Human");
+    auto view = activeHouse.tableView(activeCompetition.name, "Red", "Human");
     assert(!view.actionHistory.empty());
     assert(!view.actingSeat || *view.actingSeat == 3);
 
     if (view.legalActions) {
         const auto& legal = *view.legalActions;
         const auto action = legal.check ? Action::check : legal.call ? Action::call : Action::fold;
-        house.submitAction(competition.name, "Red", "Human", action, 0, view.eventSequence);
-        view = house.tableView(competition.name, "Red", "Human");
+        activeHouse.submitAction(activeCompetition.name, "Red", "Human", action, 0, view.eventSequence);
+        view = activeHouse.tableView(activeCompetition.name, "Red", "Human");
         assert(!view.actingSeat || *view.actingSeat == 3);
     }
 }

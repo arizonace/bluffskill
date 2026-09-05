@@ -21,6 +21,8 @@ Each table in the table-list response includes `maximumSeats` and a `players` ar
 
 `POST /v1/competitions/{competition}/tables/{table}/players` accepts only an API player name. The server constructs an `ApiPlayer` and deliberately has no human/bot/GUI field: a human client and an automated remote client are indistinguishable to it.
 
+`POST /v1/competitions/{competition}/reference-players` accepts a positive `count` and an optional `type`: `Leo` (the backward-compatible default) or `Virgo`. Requests may be repeated with different types to seat a mixture of reference players at the same table. Player entries in competition and table-list responses retain `kind: "Reference"` and add `referenceType: "Leo"` or `"Virgo"`; profile values never leave the server console.
+
 Creation request example:
 
 ```json
@@ -36,7 +38,10 @@ curl --request POST http://127.0.0.1:53153/v1/competitions \
   --data '{"flavor":"NoLimitTexasHoldEm","maximumPlayers":10,"startingStack":7000}'
 curl --request POST http://127.0.0.1:53153/v1/competitions/Valhalla/reference-players \
   --header 'Content-Type: application/json' \
-  --data '{"count":9}'
+  --data '{"count":5,"type":"Leo"}'
+curl --request POST http://127.0.0.1:53153/v1/competitions/Valhalla/reference-players \
+  --header 'Content-Type: application/json' \
+  --data '{"count":4,"type":"Virgo"}'
 ```
 
 Action request example:

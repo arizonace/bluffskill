@@ -2,10 +2,12 @@
 
 #include <string>
 #include <string_view>
+#include <optional>
 
 namespace bluffskill::poker {
 
 enum class PlayerKind { api, reference };
+enum class ReferencePlayerType { leo, virgo };
 
 // A player is an identity. How it chooses an action belongs to a controller implementation.
 class Player {
@@ -25,8 +27,10 @@ private:
 struct PlayerSummary {
     std::string name;
     PlayerKind kind;
+    std::optional<ReferencePlayerType> referenceType;
 };
 
 [[nodiscard]] std::string_view toString(PlayerKind kind) noexcept;
+[[nodiscard]] std::string_view toString(ReferencePlayerType type) noexcept;
 
 } // namespace bluffskill::poker

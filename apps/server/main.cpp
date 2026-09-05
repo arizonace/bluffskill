@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <optional>
 
 namespace {
 
@@ -186,15 +187,19 @@ public:
                 tableItem->setData(0, Qt::UserRole, QString::fromStdString(competition.name));
                 tableItem->setData(0, Qt::UserRole + 1, QString::fromStdString(table.name));
                 for (const auto& seatedPlayer : table.players) {
+                    const auto playerType = seatedPlayer.player.referenceType
+                        ? QString::fromUtf8(bluffskill::poker::toString(*seatedPlayer.player.referenceType)) + " reference player"
+                        : QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind));
                     auto* playerItem = new QTreeWidgetItem(tableItem, {QString::number(seatedPlayer.seat) + ": "
                         + QString::fromStdString(seatedPlayer.player.name) + " ("
-                        + QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind)) + ")"});
-                    const auto profile = house_.referencePlayerProfile(competition.name, table.name, seatedPlayer.player.name);
-                    if (!profile) continue;
+                        + playerType + ")"});
+                    const auto inspection = house_.referencePlayerInspection(competition.name, table.name, seatedPlayer.player.name);
+                    if (!inspection) continue;
                     auto* parameters = new QTreeWidgetItem(playerItem, {"Operating parameters"});
-                    new QTreeWidgetItem(parameters, {"riskTolerance: " + QString::number(profile->riskTolerance, 'f', 2)});
-                    new QTreeWidgetItem(parameters, {"optimism: " + QString::number(profile->optimism, 'f', 2)});
-                    new QTreeWidgetItem(parameters, {"variability: " + QString::number(profile->variability, 'f', 2)});
+                    for (const auto& parameter : inspection->parameters) {
+                        new QTreeWidgetItem(parameters, {QString::fromStdString(parameter.name) + ": "
+                            + QString::number(parameter.value, 'f', 2)});
+                    }
                 }
             }
         }
@@ -495,10 +500,13 @@ QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competi
     QJsonArray players;
     for (const auto& table : competition.tables) {
         for (const auto& seatedPlayer : table.players) {
-            players.append(QJsonObject{{"name", QString::fromStdString(seatedPlayer.player.name)},
-                                       {"kind", QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind))},
-                                       {"table", QString::fromStdString(table.name)},
-                                       {"seat", static_cast<int>(seatedPlayer.seat)}});
+            QJsonObject player{{"name", QString::fromStdString(seatedPlayer.player.name)},
+                {"kind", QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind))},
+                {"table", QString::fromStdString(table.name)}, {"seat", static_cast<int>(seatedPlayer.seat)}};
+            if (seatedPlayer.player.referenceType) {
+                player.insert("referenceType", QString::fromUtf8(bluffskill::poker::toString(*seatedPlayer.player.referenceType)));
+            }
+            players.append(player);
         }
     }
     QJsonArray chipDenominations;
@@ -515,9 +523,13 @@ QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competi
 QJsonObject tableJson(const bluffskill::poker::TableSummary& table) {
     QJsonArray players;
     for (const auto& seatedPlayer : table.players) {
-        players.append(QJsonObject{{"name", QString::fromStdString(seatedPlayer.player.name)},
-                                   {"kind", QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind))},
-                                   {"seat", static_cast<int>(seatedPlayer.seat)}});
+        QJsonObject player{{"name", QString::fromStdString(seatedPlayer.player.name)},
+            {"kind", QString::fromUtf8(bluffskill::poker::toString(seatedPlayer.player.kind))},
+            {"seat", static_cast<int>(seatedPlayer.seat)}};
+        if (seatedPlayer.player.referenceType) {
+            player.insert("referenceType", QString::fromUtf8(bluffskill::poker::toString(*seatedPlayer.player.referenceType)));
+        }
+        players.append(player);
     }
     return {{"name", QString::fromStdString(table.name)},
             {"maximumSeats", static_cast<int>(table.maximumSeats)},
@@ -597,6 +609,12 @@ std::optional<bluffskill::poker::Action> parseAction(const QString& value) {
     if (action == "bet") return bluffskill::poker::Action::bet;
     if (action == "raise") return bluffskill::poker::Action::raise;
     if (action == "fold") return bluffskill::poker::Action::fold;
+    return std::nullopt;
+}
+
+std::optional<bluffskill::poker::ReferencePlayerType> parseReferencePlayerType(const QString& value) {
+    if (value.isEmpty() || value.compare("Leo", Qt::CaseInsensitive) == 0) return bluffskill::poker::ReferencePlayerType::leo;
+    if (value.compare("Virgo", Qt::CaseInsensitive) == 0) return bluffskill::poker::ReferencePlayerType::virgo;
     return std::nullopt;
 }
 
@@ -746,9 +764,14 @@ int main(int argc, char* argv[]) {
     server.route("/v1/competitions/<arg>/reference-players", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QHttpServerRequest& request) -> QHttpServerResponse {
             const auto json = QJsonDocument::fromJson(request.body()).object();
+            const auto type = parseReferencePlayerType(json.value("type").toString());
+            if (!type) {
+                window.log("POST /v1/competitions/" + competitionName + "/reference-players → 400");
+                return QHttpServerResponse(QJsonObject{{"error", "type must be Leo or Virgo"}}, QHttpServerResponder::StatusCode::BadRequest);
+            }
             try {
                 const auto competition = window.house().createReferencePlayers(
-                    competitionName.toStdString(), static_cast<std::size_t>(json.value("count").toInt()));
+                    competitionName.toStdString(), static_cast<std::size_t>(json.value("count").toInt()), *type);
                 window.refreshTree();
                 window.log("POST /v1/competitions/" + competitionName + "/reference-players → 201");
                 return QHttpServerResponse(competitionJson(competition), QHttpServerResponder::StatusCode::Created);

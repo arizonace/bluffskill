@@ -44,13 +44,14 @@ public:
     // `House` is the one singleton per server process. The application owns it.
     explicit House(BlindSchedule blindSchedule = {}, ChipDenominations chipDenominations = defaultChipDenominations());
     [[nodiscard]] CompetitionSummary createSingleTableTournament(TournamentSpec spec);
-    [[nodiscard]] CompetitionSummary createReferencePlayers(std::string_view competitionName, std::size_t count);
+    [[nodiscard]] CompetitionSummary createReferencePlayers(
+        std::string_view competitionName, std::size_t count, ReferencePlayerType type = ReferencePlayerType::leo);
     [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
     [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
     [[nodiscard]] TableView tableView(std::string_view competitionName, std::string_view tableName, std::string_view viewerName = {}) const;
     // Server-console inspection only. REST adapters must never project bot profiles.
-    [[nodiscard]] std::optional<ReferencePlayerProfile> referencePlayerProfile(
+    [[nodiscard]] std::optional<ReferencePlayerInspection> referencePlayerInspection(
         std::string_view competitionName, std::string_view tableName, std::string_view playerName) const;
     void submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
         Action action, Chips amount, std::uint64_t expectedSequence);

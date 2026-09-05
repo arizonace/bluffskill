@@ -1,6 +1,8 @@
 #include "bluffskill/poker/house.hpp"
 #include "bluffskill/poker/api_player.hpp"
+#include "bluffskill/poker/leo_reference_player.hpp"
 #include "bluffskill/poker/reference_player.hpp"
+#include "bluffskill/poker/virgo_reference_player.hpp"
 
 #include <array>
 #include <algorithm>
@@ -122,7 +124,7 @@ void House::validatePlayerName(const Competition& competition, std::string_view 
     if (exists) throw std::invalid_argument("player name is already in use for this competition");
 }
 
-CompetitionSummary House::createReferencePlayers(std::string_view competitionName, std::size_t count) {
+CompetitionSummary House::createReferencePlayers(std::string_view competitionName, std::size_t count, ReferencePlayerType type) {
     auto& competition = findCompetition(competitionName);
     const auto occupiedSeats = competition.players.size();
     std::size_t capacity = 0;
@@ -141,12 +143,21 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
         }
         if (!seat) throw std::runtime_error("could not find a free seat");
         const auto playerName = nextReferencePlayerName(competition);
+        std::unique_ptr<ReferencePlayerController> referencePlayer;
+        switch (type) {
+        case ReferencePlayerType::leo:
+            referencePlayer = std::make_unique<LeoReferencePlayer>(playerName, LeoReferencePlayerProfile{
+                .riskTolerance = disposition(random_), .optimism = disposition(random_), .variability = disposition(random_),
+            });
+            break;
+        case ReferencePlayerType::virgo:
+            referencePlayer = std::make_unique<VirgoReferencePlayer>(playerName, VirgoReferencePlayerProfile{
+                .curiosity = disposition(random_), .hope = disposition(random_), .empathy = disposition(random_), .longevity = disposition(random_),
+            });
+            break;
+        }
         competition.players.push_back({
-            .player = std::make_unique<ReferencePlayer>(playerName, ReferencePlayerProfile{
-                .riskTolerance = disposition(random_),
-                .optimism = disposition(random_),
-                .variability = disposition(random_),
-            }),
+            .player = std::move(referencePlayer),
             .tableIndex = tableIndex - 1,
             .seat = *seat,
         });
@@ -190,8 +201,12 @@ CompetitionSummary House::summaryOf(const Competition& competition) const {
     auto summary = competition.summary;
     for (auto& table : summary.tables) table.players.clear();
     for (const auto& player : competition.players) {
+        std::optional<ReferencePlayerType> referenceType;
+        if (player.player->kind() == PlayerKind::reference) {
+            referenceType = static_cast<const ReferencePlayerController&>(*player.player).referenceType();
+        }
         summary.tables[player.tableIndex].players.push_back({
-            .player = {.name = player.player->name(), .kind = player.player->kind()},
+            .player = {.name = player.player->name(), .kind = player.player->kind(), .referenceType = referenceType},
             .seat = player.seat,
         });
     }
@@ -217,7 +232,7 @@ TableView House::tableView(std::string_view competitionName, std::string_view ta
     return findTable(*competition, tableName).viewFor(viewerName);
 }
 
-std::optional<ReferencePlayerProfile> House::referencePlayerProfile(
+std::optional<ReferencePlayerInspection> House::referencePlayerInspection(
     std::string_view competitionName, std::string_view tableName, std::string_view playerName) const {
     const auto* competition = findCompetition(competitionName);
     if (competition == nullptr) return std::nullopt;
@@ -226,7 +241,8 @@ std::optional<ReferencePlayerProfile> House::referencePlayerProfile(
         return candidate.tableIndex == tableIndex && candidate.player->name() == playerName;
     });
     if (player == competition->players.end() || player->player->kind() != PlayerKind::reference) return std::nullopt;
-    return static_cast<const ReferencePlayer&>(*player->player).profile();
+    const auto& referencePlayer = static_cast<const ReferencePlayerController&>(*player->player);
+    return ReferencePlayerInspection{.type = referencePlayer.referenceType(), .parameters = referencePlayer.parameters()};
 }
 
 void House::submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
@@ -271,7 +287,7 @@ void House::advanceReferencePlayers(Competition& competition, std::size_t tableI
         if (actor == competition.players.end()) throw std::logic_error("the acting seat has no player identity");
         if (actor->player->kind() != PlayerKind::reference) return;
 
-        const auto& referencePlayer = static_cast<const ReferencePlayer&>(*actor->player);
+        const auto& referencePlayer = static_cast<const ReferencePlayerController&>(*actor->player);
         const auto privateView = table.viewFor(referencePlayer.name());
         const auto decision = referencePlayer.chooseResponse(privateView, random_);
         table.submitAction(referencePlayer.name(), decision.action, decision.amount, privateView.eventSequence);
