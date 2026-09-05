@@ -149,7 +149,7 @@ public:
     explicit ServerWindow(bluffskill::app_config::Settings settings)
         : house_(pokerBlindSchedule(settings), pokerChipDenominations(settings)), settings_(std::move(settings)) {
         setWindowTitle("BluffSkill Server");
-        resize(1180, 600);
+        resize(1600, 680);
         auto* splitter = new QSplitter(this);
         tree_ = new QTreeWidget(splitter);
         tree_->setHeaderLabels({"House / competition / table / player"});
@@ -158,13 +158,20 @@ public:
         actionLog_ = new QTableWidget(splitter);
         actionLog_->setColumnCount(7);
         actionLog_->setHorizontalHeaderLabels({"Player", "Kind", "Round", "Action", "Value", "Stack", "Hand"});
+        actionLog_->setMinimumWidth(900);
+        actionLog_->setColumnWidth(0, 160);
+        actionLog_->setColumnWidth(1, 95);
+        actionLog_->setColumnWidth(2, 95);
+        actionLog_->setColumnWidth(3, 120);
+        actionLog_->setColumnWidth(4, 110);
+        actionLog_->setColumnWidth(5, 115);
         actionLog_->horizontalHeader()->setStretchLastSection(true);
         actionLog_->verticalHeader()->setVisible(false);
         actionLog_->setEditTriggers(QAbstractItemView::NoEditTriggers);
         actionLog_->setSelectionMode(QAbstractItemView::NoSelection);
         actionLog_->setAlternatingRowColors(true);
         tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-        splitter->setSizes({300, 380, 500});
+        splitter->setSizes({280, 320, 1000});
         setCentralWidget(splitter);
         auto* fileMenu = menuBar()->addMenu("File");
         auto* saveActionLogAction = fileMenu->addAction("Save Action Log…");
@@ -371,11 +378,19 @@ private:
             for (const auto& table : competition.tables) {
                 const auto tableView = house_.tableView(competition.name, table.name);
                 for (const auto& player : tableView.players) {
+                    QJsonObject profile;
+                    auto type = QString::fromUtf8(bluffskill::poker::toString(player.kind));
+                    if (const auto inspection = house_.referencePlayerInspection(competition.name, table.name, player.name)) {
+                        type = QString::fromUtf8(bluffskill::poker::toString(inspection->type));
+                        for (const auto& parameter : inspection->parameters) {
+                            profile.insert(QString::fromStdString(parameter.name), parameter.value);
+                        }
+                    }
                     players.append(QJsonObject{{"competition", QString::fromStdString(competition.name)},
                         {"table", QString::fromStdString(table.name)}, {"name", QString::fromStdString(player.name)},
                         {"kind", QString::fromUtf8(bluffskill::poker::toString(player.kind))}, {"seat", static_cast<int>(player.seat)},
                         {"stack", static_cast<qint64>(player.stack)}, {"committed", static_cast<qint64>(player.committed)},
-                        {"folded", player.folded}});
+                        {"folded", player.folded}, {"type", type}, {"profile", profile}});
                 }
             }
         }
@@ -433,7 +448,25 @@ private:
         const auto path = QFileDialog::getSaveFileName(this, "Save Table as JSON", suggestedExportPath(tableName + ".json"), "JSON (*.json)");
         if (path.isEmpty()) return;
         const auto table = house_.tableView(competitionName.toStdString(), tableName.toStdString());
-        writeFile(withSuffix(path, "json"), QJsonDocument(tableViewJson(table)).toJson(QJsonDocument::Indented), "Table JSON");
+        auto exportData = tableViewJson(table);
+        auto players = exportData.value("players").toArray();
+        for (auto playerValue : players) {
+            auto player = playerValue.toObject();
+            QJsonObject profile;
+            auto type = player.value("kind").toString();
+            if (const auto inspection = house_.referencePlayerInspection(competitionName.toStdString(), tableName.toStdString(),
+                    player.value("name").toString().toStdString())) {
+                type = QString::fromUtf8(bluffskill::poker::toString(inspection->type));
+                for (const auto& parameter : inspection->parameters) {
+                    profile.insert(QString::fromStdString(parameter.name), parameter.value);
+                }
+            }
+            player.insert("type", type);
+            player.insert("profile", profile);
+            playerValue = player;
+        }
+        exportData.insert("players", players);
+        writeFile(withSuffix(path, "json"), QJsonDocument(exportData).toJson(QJsonDocument::Indented), "Table JSON");
     }
 
     void showTreeContextMenu(const QPoint& position) {
@@ -823,7 +856,8 @@ int main(int argc, char* argv[]) {
                 window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/next-hand → 200");
                 return tableViewResponse(table);
             } catch (const std::exception& exception) {
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/next-hand → 409");
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName
+                    + "/next-hand → 409: " + QString::fromUtf8(exception.what()));
                 return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
             }
         });

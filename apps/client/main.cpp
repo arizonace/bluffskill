@@ -229,6 +229,7 @@ public:
             communityCards_.clear();
             playerRoundCommitted_.fill(0);
             playerActing_.fill(false);
+            playerFolded_.fill(false);
             pot_ = 0;
             currentBet_ = 0;
         }
@@ -270,6 +271,7 @@ public:
 
     void showLastAction(std::size_t seat, QString action, qint64 amount) {
         if (seat == 0 || seat > playerLastActions_.size()) return;
+        if (action.compare("Fold", Qt::CaseInsensitive) == 0) playerFolded_[seat - 1] = true;
         playerLastActions_[seat - 1] = {.name = std::move(action), .amount = amount, .visible = true};
         update();
     }

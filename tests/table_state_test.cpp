@@ -152,6 +152,7 @@ int main() {
     rotation.startNextHand();
     const auto nextHand = rotation.viewFor();
     assert(nextHand.street == Street::preflop);
+    for (const auto& player : nextHand.players) assert(!player.folded);
     assert(nextHand.roundsPlayed == 2);
     assert(nextHand.dealerSeat == 2);
     assert(nextHand.smallBlindSeat == 3);
