@@ -43,7 +43,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <optional>
+#include <vector>
 
 namespace {
 
@@ -262,13 +264,28 @@ private:
         return QString::fromStdString(player.showdownDescription);
     }
 
-    [[nodiscard]] static QString communityCards(const bluffskill::poker::TableView& view, std::size_t first, std::size_t count) {
-        QStringList cards;
-        const auto last = std::min(first + count, view.communityCards.size());
-        for (auto index = first; index < last; ++index) {
-            cards.append(QString::fromStdString(bluffskill::cards::toString(view.communityCards[index])));
+    [[nodiscard]] static QString pokerNotation(bluffskill::cards::Card card) {
+        const auto rank = card.rank == bluffskill::cards::Rank::ten
+            ? QStringLiteral("10")
+            : QString::fromStdString(bluffskill::cards::toString(card.rank));
+        switch (card.suit) {
+        case bluffskill::cards::Suit::spades: return rank + 's';
+        case bluffskill::cards::Suit::hearts: return rank + 'h';
+        case bluffskill::cards::Suit::diamonds: return rank + 'd';
+        case bluffskill::cards::Suit::clubs: return rank + 'c';
         }
-        return cards.join(", ");
+        return {};
+    }
+
+    [[nodiscard]] static QString communityCards(const bluffskill::poker::TableView& view, std::size_t first, std::size_t count) {
+        std::vector<bluffskill::cards::Card> cards;
+        const auto last = std::min(first + count, view.communityCards.size());
+        cards.insert(cards.end(), view.communityCards.begin() + static_cast<std::ptrdiff_t>(first),
+            view.communityCards.begin() + static_cast<std::ptrdiff_t>(last));
+        std::stable_sort(cards.begin(), cards.end(), [](const auto& left, const auto& right) { return left.rank > right.rank; });
+        QStringList notation;
+        for (const auto card : cards) notation.append(pokerNotation(card));
+        return notation.join(' ');
     }
 
     void appendCommunityCardLogRows(const bluffskill::poker::TableView& view, ActionLogCursor& cursor) {
