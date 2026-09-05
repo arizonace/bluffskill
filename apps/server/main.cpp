@@ -6,6 +6,9 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QHash>
 #include <QHttpServer>
@@ -18,6 +21,7 @@
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMenu>
 #include <QCheckBox>
 #include <QLineEdit>
 #include <QLocale>
@@ -25,6 +29,7 @@
 #include <QSet>
 #include <QSplitter>
 #include <QSpinBox>
+#include <QStatusBar>
 #include <QTcpServer>
 #include <QTableWidget>
 #include <QTreeWidget>
@@ -52,6 +57,8 @@ bluffskill::poker::BlindSchedule pokerBlindSchedule(const bluffskill::app_config
         .smallBlind = static_cast<bluffskill::poker::Chips>(settings.chipDenominations.front()) * settings.smallBlind,
     };
 }
+
+QJsonObject tableViewJson(const bluffskill::poker::TableView& table);
 
 class SettingsDialog final : public QDialog {
 public:
@@ -143,20 +150,25 @@ public:
         log_ = new QPlainTextEdit(splitter);
         log_->setReadOnly(true);
         actionLog_ = new QTableWidget(splitter);
-        actionLog_->setColumnCount(5);
-        actionLog_->setHorizontalHeaderLabels({"Player", "Round", "Action", "Value", "Stack"});
+        actionLog_->setColumnCount(6);
+        actionLog_->setHorizontalHeaderLabels({"Player", "Round", "Action", "Value", "Stack", "Hand"});
         actionLog_->horizontalHeader()->setStretchLastSection(true);
         actionLog_->verticalHeader()->setVisible(false);
         actionLog_->setEditTriggers(QAbstractItemView::NoEditTriggers);
         actionLog_->setSelectionMode(QAbstractItemView::NoSelection);
         actionLog_->setAlternatingRowColors(true);
+        tree_->setContextMenuPolicy(Qt::CustomContextMenu);
         splitter->setSizes({300, 380, 500});
         setCentralWidget(splitter);
+        auto* fileMenu = menuBar()->addMenu("File");
+        auto* saveActionLogAction = fileMenu->addAction("Save Action Log…");
         auto* appMenu = menuBar()->addMenu("Application");
         auto* settingsAction = appMenu->addAction("Settings…");
         auto* aboutAction = appMenu->addAction("About BluffSkill Server");
+        connect(saveActionLogAction, &QAction::triggered, this, [this] { saveActionLog(); });
         connect(settingsAction, &QAction::triggered, this, [this] { editSettings(); });
         connect(aboutAction, &QAction::triggered, this, [this] { showAbout(); });
+        connect(tree_, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& position) { showTreeContextMenu(position); });
         refreshTree();
     }
 
@@ -171,6 +183,8 @@ public:
             auto* competitionItem = new QTreeWidgetItem(house, {QString::fromStdString(competition.name)});
             for (const auto& table : competition.tables) {
                 auto* tableItem = new QTreeWidgetItem(competitionItem, {QString::fromStdString(table.name) + " (" + QString::number(table.players.size()) + " / " + QString::number(table.maximumSeats) + ")"});
+                tableItem->setData(0, Qt::UserRole, QString::fromStdString(competition.name));
+                tableItem->setData(0, Qt::UserRole + 1, QString::fromStdString(table.name));
                 for (const auto& seatedPlayer : table.players) {
                     auto* playerItem = new QTreeWidgetItem(tableItem, {QString::number(seatedPlayer.seat) + ": "
                         + QString::fromStdString(seatedPlayer.player.name) + " ("
@@ -214,12 +228,14 @@ private:
         QHash<int, qint64> handStartingStacks;
         QSet<int> loggedBustedSeats;
         QSet<int> loggedPotWinnerSeats;
+        QSet<int> loggedShowdownHandSeats;
         bool loggedFoldedPot{false};
         bool loggedTableWinner{false};
         qint64 lastBigBlind{0};
     };
 
-    void appendActionLogRow(const QString& player, const QString& round, const QString& action, const QString& value = {}, const QString& stack = {}) {
+    void appendActionLogRow(const QString& player, const QString& round, const QString& action, const QString& value = {}, const QString& stack = {},
+        const QString& hand = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
         actionLog_->setItem(row, 0, new QTableWidgetItem(player));
@@ -227,7 +243,123 @@ private:
         actionLog_->setItem(row, 2, new QTableWidgetItem(action));
         actionLog_->setItem(row, 3, new QTableWidgetItem(value));
         actionLog_->setItem(row, 4, new QTableWidgetItem(stack));
+        actionLog_->setItem(row, 5, new QTableWidgetItem(hand));
+        actionLog_->item(row, 0)->setData(Qt::UserRole, activeActionLogTableKey_);
         actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
+    }
+
+    [[nodiscard]] static QString showdownHand(const bluffskill::poker::TablePlayerView& player) {
+        return QString::fromStdString(player.showdownDescription);
+    }
+
+    [[nodiscard]] static QString csvCell(QString value) {
+        value.replace('"', "\"\"");
+        return '"' + value + '"';
+    }
+
+    [[nodiscard]] static QString withSuffix(QString path, const QString& suffix) {
+        if (QFileInfo(path).suffix().isEmpty()) path += '.' + suffix;
+        return path;
+    }
+
+    [[nodiscard]] QJsonArray actionLogJson(const QString& tableKey = {}) const {
+        QJsonArray actions;
+        for (int row = 0; row < actionLog_->rowCount(); ++row) {
+            const auto* player = actionLog_->item(row, 0);
+            if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
+            actions.append(QJsonObject{{"player", player->text()},
+                {"round", actionLog_->item(row, 1)->text()},
+                {"action", actionLog_->item(row, 2)->text()},
+                {"value", actionLog_->item(row, 3)->text()},
+                {"stack", actionLog_->item(row, 4)->text()},
+                {"hand", actionLog_->item(row, 5)->text()}});
+        }
+        return actions;
+    }
+
+    [[nodiscard]] QJsonArray playersJson() const {
+        QJsonArray players;
+        for (const auto& competition : house_.competitions()) {
+            for (const auto& table : competition.tables) {
+                const auto tableView = house_.tableView(competition.name, table.name);
+                for (const auto& player : tableView.players) {
+                    players.append(QJsonObject{{"competition", QString::fromStdString(competition.name)},
+                        {"table", QString::fromStdString(table.name)}, {"name", QString::fromStdString(player.name)},
+                        {"kind", QString::fromUtf8(bluffskill::poker::toString(player.kind))}, {"seat", static_cast<int>(player.seat)},
+                        {"stack", static_cast<qint64>(player.stack)}, {"committed", static_cast<qint64>(player.committed)},
+                        {"folded", player.folded}});
+                }
+            }
+        }
+        return players;
+    }
+
+    bool writeFile(const QString& path, const QByteArray& contents, const QString& description) {
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            QMessageBox::warning(this, "Save failed", "Could not save " + description + ".\n" + file.errorString());
+            return false;
+        }
+        if (file.write(contents) != contents.size()) {
+            QMessageBox::warning(this, "Save failed", "Could not save " + description + ".\n" + file.errorString());
+            return false;
+        }
+        statusBar()->showMessage("Saved " + description + " to " + path, 5'000);
+        return true;
+    }
+
+    bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
+        QString csv = "Player,Round,Action,Value,Stack,Hand\n";
+        for (int row = 0; row < actionLog_->rowCount(); ++row) {
+            const auto* player = actionLog_->item(row, 0);
+            if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
+            for (int column = 0; column < actionLog_->columnCount(); ++column) {
+                if (column > 0) csv += ',';
+                const auto* item = actionLog_->item(row, column);
+                csv += csvCell(item == nullptr ? QString{} : item->text());
+            }
+            csv += '\n';
+        }
+        return writeFile(withSuffix(path, "csv"), csv.toUtf8(), "Action Log CSV");
+    }
+
+    bool saveActionLogJson(const QString& path) {
+        const QJsonObject exportData{{"actionLog", actionLogJson()}, {"players", playersJson()}};
+        return writeFile(withSuffix(path, "json"), QJsonDocument(exportData).toJson(QJsonDocument::Indented), "Action Log JSON");
+    }
+
+    void saveActionLog() {
+        QString selectedFilter;
+        const auto path = QFileDialog::getSaveFileName(this, "Save Action Log", "BluffSkill-action-log",
+            "CSV (*.csv);;JSON (*.json)", &selectedFilter);
+        if (path.isEmpty()) return;
+        if (selectedFilter.startsWith("JSON")) saveActionLogJson(path);
+        else saveActionLogCsv(path);
+    }
+
+    void saveTableAsJson(const QString& competitionName, const QString& tableName) {
+        const auto path = QFileDialog::getSaveFileName(this, "Save Table as JSON", tableName + ".json", "JSON (*.json)");
+        if (path.isEmpty()) return;
+        const auto table = house_.tableView(competitionName.toStdString(), tableName.toStdString());
+        writeFile(withSuffix(path, "json"), QJsonDocument(tableViewJson(table)).toJson(QJsonDocument::Indented), "Table JSON");
+    }
+
+    void showTreeContextMenu(const QPoint& position) {
+        const auto* item = tree_->itemAt(position);
+        if (item == nullptr) return;
+        const auto competitionName = item->data(0, Qt::UserRole).toString();
+        const auto tableName = item->data(0, Qt::UserRole + 1).toString();
+        if (competitionName.isEmpty() || tableName.isEmpty()) return;
+
+        QMenu menu(tree_);
+        auto* saveTableAction = menu.addAction("Save Table as JSON");
+        auto* saveLogAction = menu.addAction("Save Action Log as CSV");
+        const auto* selected = menu.exec(tree_->viewport()->mapToGlobal(position));
+        if (selected == saveTableAction) saveTableAsJson(competitionName, tableName);
+        if (selected == saveLogAction) {
+            const auto path = QFileDialog::getSaveFileName(this, "Save Action Log as CSV", tableName + "-action-log.csv", "CSV (*.csv)");
+            if (!path.isEmpty()) saveActionLogCsv(path, competitionName + '/' + tableName);
+        }
     }
 
     static QString actionFingerprint(const bluffskill::poker::ActionView& action) {
@@ -243,6 +375,7 @@ private:
                 QStringList history;
                 for (const auto& action : view.actionHistory) history.append(actionFingerprint(action));
                 const auto tableKey = QString::fromStdString(competition.name) + '/' + QString::fromStdString(table.name);
+                activeActionLogTableKey_ = tableKey;
                 auto& cursor = actionLogCursors_[tableKey];
                 const auto continues = cursor.history.size() <= history.size()
                     && std::equal(cursor.history.cbegin(), cursor.history.cend(), history.cbegin());
@@ -272,6 +405,7 @@ private:
                     cursor.history.clear();
                     cursor.handStartingStacks.clear();
                     cursor.loggedPotWinnerSeats.clear();
+                    cursor.loggedShowdownHandSeats.clear();
                     cursor.loggedFoldedPot = false;
                     for (const auto& player : view.players) {
                         if (player.stack > 0 || player.committed > 0) {
@@ -298,8 +432,9 @@ private:
                             const auto winnings = winningsBySeat.value(seat);
                             if (winnings > 0 && !cursor.loggedPotWinnerSeats.contains(seat)) {
                                 appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Pot Won", QLocale().toString(winnings),
-                                    QLocale().toString(player.stack));
+                                    QLocale().toString(player.stack), showdownHand(player));
                                 cursor.loggedPotWinnerSeats.insert(seat);
+                                cursor.loggedShowdownHandSeats.insert(seat);
                             }
                         }
                     } else if (!cursor.loggedFoldedPot) {
@@ -318,8 +453,19 @@ private:
                     for (const auto& player : view.players) {
                         const auto seat = static_cast<int>(player.seat);
                         if (player.stack == 0 && cursor.handStartingStacks.value(seat) > 0 && !cursor.loggedBustedSeats.contains(seat)) {
-                            appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Busted Out", {}, QLocale().toString(player.stack));
+                            appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Busted Out", {}, QLocale().toString(player.stack),
+                                showdownHand(player));
                             cursor.loggedBustedSeats.insert(seat);
+                            if (view.showdownOccurred) cursor.loggedShowdownHandSeats.insert(seat);
+                        }
+                    }
+                    if (view.showdownOccurred) {
+                        for (const auto& player : view.players) {
+                            const auto seat = static_cast<int>(player.seat);
+                            if (player.folded || cursor.loggedShowdownHandSeats.contains(seat)) continue;
+                            appendActionLogRow(QString::fromStdString(player.name), "Showdown", "Hand", {}, QLocale().toString(player.stack),
+                                showdownHand(player));
+                            cursor.loggedShowdownHandSeats.insert(seat);
                         }
                     }
                     const auto tableWinner = std::ranges::find_if(view.players, [](const auto& player) { return player.stack > 0; });
@@ -342,6 +488,7 @@ private:
     QPlainTextEdit* log_{};
     QTableWidget* actionLog_{};
     QHash<QString, ActionLogCursor> actionLogCursors_;
+    QString activeActionLogTableKey_;
 };
 
 QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competition) {
