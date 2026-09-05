@@ -301,10 +301,11 @@ private:
 
     [[nodiscard]] QJsonArray actionLogJson(const QString& tableKey = {}) const {
         QJsonArray actions;
+        int serializedIndex = 1;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
             const auto* player = actionLog_->item(row, 0);
             if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
-            actions.append(QJsonObject{{"player", player->text()},
+            actions.append(QJsonObject{{"index", serializedIndex++}, {"player", player->text()},
                 {"kind", actionLog_->item(row, 1)->text()},
                 {"round", actionLog_->item(row, 2)->text()},
                 {"action", actionLog_->item(row, 3)->text()},
@@ -349,12 +350,14 @@ private:
     }
 
     bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
-        QString csv = "Player,Kind,Round,Action,Value,Stack,Hand\n";
+        QString csv = "Index,Player,Kind,Round,Action,Value,Stack,Hand\n";
+        int serializedIndex = 1;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
             const auto* player = actionLog_->item(row, 0);
             if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
+            csv += QString::number(serializedIndex++);
             for (int column = 0; column < actionLog_->columnCount(); ++column) {
-                if (column > 0) csv += ',';
+                csv += ',';
                 const auto* item = actionLog_->item(row, column);
                 csv += csvCell(item == nullptr ? QString{} : item->text());
             }
