@@ -631,7 +631,8 @@ private:
                     for (const auto& player : view.players) {
                         const auto seat = static_cast<int>(player.seat);
                         if (player.stack == 0 && cursor.handStartingStacks.value(seat) > 0 && !cursor.loggedBustedSeats.contains(seat)) {
-                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", "Busted Out", {}, QLocale().toString(player.stack),
+                            const auto lost = committedThroughAction(view, player.seat, view.actionHistory.size()) - winningsBySeat.value(seat);
+                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", "Busted Out", lostValue(lost), QLocale().toString(player.stack),
                                 showdownHand(player));
                             cursor.loggedBustedSeats.insert(seat);
                             if (view.showdownOccurred) cursor.loggedShowdownHandSeats.insert(seat);
