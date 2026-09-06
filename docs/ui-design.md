@@ -28,7 +28,7 @@ Connection UI accepts host and port, then progressively enables competition and 
 
 ## Server console
 
-The server window has a live event log, an expandable tree (House → competition → table → player), and an action table with anchored headers for player, kind, round, action, value, stack, and hand. The kind is `API`, `Leo`, or `Virgo` for player rows; game-level rows leave it blank. Each reference-player tree entry explicitly identifies its type (for example, `Leo reference player` or `Virgo reference player`) and expands to that type's server-private operating parameters. It displays its listening address, records incoming calls and response status without secrets, and eventually exposes controlled actions: create competition, add reference players, pause/resume, snapshot, and export OPML.
+The server window has a live event log, an expandable tree (House → competition → table → player), and an action table with anchored headers for player, kind, round, action, value, stack, gain, pot, and hand. `Value` records the betting or pot operation, while signed `Gain` records a player's profit or loss; `Pot` records the authoritative amount at the turn boundary. The kind is `API`, `Leo`, or `Virgo` for player rows; game-level rows leave it blank. Each reference-player tree entry explicitly identifies its type (for example, `Leo reference player` or `Virgo reference player`) and expands to that type's server-private operating parameters. It displays its listening address, records incoming calls and response status without secrets, and eventually exposes controlled actions: create competition, add reference players, pause/resume, snapshot, and export OPML.
 
 ## Product principles
 

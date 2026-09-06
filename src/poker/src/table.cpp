@@ -261,6 +261,11 @@ void Table::postBlind(Seat& seat, Chips amount, Action action) {
     seat.allIn = seat.stack == 0;
     history_.push_back({.player = seat.name, .seat = seat.number, .street = Street::preflop, .action = action, .amount = paid,
         .stackAfter = seat.stack});
+    const auto blindPots = pots();
+    history_.back().potAfter = std::accumulate(blindPots.begin(), blindPots.end(), Chips{0}, [](Chips total, const PotView& pot) {
+        return total + pot.amount;
+    });
+    history_.back().currentBetAfter = seat.roundCommitted;
 }
 
 void Table::setBlindSchedule(BlindSchedule blindSchedule) {
