@@ -546,6 +546,10 @@ private:
         return amount > 0 ? '+' + QLocale().toString(amount) : QString{};
     }
 
+    [[nodiscard]] static QString netValue(bluffskill::poker::Chips amount) {
+        return amount >= 0 ? gainedValue(amount) : lostValue(-amount);
+    }
+
     [[nodiscard]] static qint64 totalPot(const bluffskill::poker::TableView& view) {
         qint64 total = 0;
         for (const auto& pot : view.pots) total += static_cast<qint64>(pot.amount);
@@ -631,8 +635,9 @@ private:
                             const auto seat = static_cast<int>(player.seat);
                             const auto winnings = winningsBySeat.value(seat);
                             if (winnings > 0 && !cursor.loggedPotWinnerSeats.contains(seat)) {
+                                const auto netGain = winnings - static_cast<qint64>(player.committed);
                                 appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", round, "Pot Won", QLocale().toString(potValue),
-                                    QLocale().toString(player.stack), gainedValue(winnings), QLocale().toString(potValue), showdownHand(player));
+                                    QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue), showdownHand(player));
                                 cursor.loggedPotWinnerSeats.insert(seat);
                                 cursor.loggedShowdownHandSeats.insert(seat);
                             }
@@ -644,8 +649,9 @@ private:
                         for (const auto& player : view.players) {
                             const auto winnings = winningsBySeat.value(static_cast<int>(player.seat));
                             if (winnings <= 0) continue;
+                            const auto netGain = winnings - static_cast<qint64>(player.committed);
                             appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), foldedRound, round, "Pot Folded", QLocale().toString(potValue),
-                                QLocale().toString(player.stack), gainedValue(winnings), QLocale().toString(potValue));
+                                QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue));
                             cursor.loggedFoldedPot = true;
                             break;
                         }
