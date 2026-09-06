@@ -96,7 +96,7 @@ std::string describeHand(const HandRank& rank) {
     switch (rank.category) {
     case 8: return "Straight Flush(" + rankName(values[0]) + ')';
     case 7: return "Quad(" + rankName(values[0]) + "), " + joinRanks(values, 1);
-    case 6: return "Full-House(" + rankName(values[0]) + ',' + rankName(values[1]) + ')';
+    case 6: return "Boat(" + rankName(values[0]) + ',' + rankName(values[1]) + ')';
     case 5: return "Flush(" + rankName(values[0]) + ')';
     case 4: return "Straight(" + rankName(values[0]) + ')';
     case 3: return "Set(" + rankName(values[0]) + "), " + joinRanks(values, 1);
@@ -350,6 +350,11 @@ void Table::startHand() {
     postBlind(*small, smallBlindAmount(), Action::smallBlind);
     postBlind(*big, bigBlindAmount(), Action::bigBlind);
     currentBet_ = big->roundCommitted;
+    const auto openingPots = pots();
+    history_.back().potAfter = std::accumulate(openingPots.begin(), openingPots.end(), Chips{0}, [](Chips total, const PotView& pot) {
+        return total + pot.amount;
+    });
+    history_.back().currentBetAfter = currentBet_;
     lastFullRaise_ = bigBlindAmount();
     for (auto& seat : seats_) seat.pending = !seat.folded && !seat.allIn;
     if (const auto* actor = nextPendingSeatAfter(big->number)) actingSeat_ = actor->number;
@@ -478,7 +483,7 @@ std::vector<PotView> Table::pots() const {
 }
 
 TableView Table::viewFor(std::string_view viewerName) const {
-    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .currentBet = currentBet_,
+    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .startingStack = startingStack_, .currentBet = currentBet_,
         .smallBlind = smallBlindAmount(), .bigBlind = bigBlindAmount(), .chipDenominations = chipDenominations_,
         .blindLevel = blindLevel_, .roundsPlayed = roundsPlayed_, .dealerSeat = dealerSeat_,
         .smallBlindSeat = smallBlindSeat_, .bigBlindSeat = bigBlindSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_,
@@ -700,6 +705,12 @@ void Table::submitAction(std::string_view playerName, Action action, Chips amoun
         .stackAfter = actor.stack});
     ++eventSequence_;
     advanceAfterAction(actor, fullRaise);
+    auto& recordedAction = history_.back();
+    const auto actionPots = pots();
+    recordedAction.potAfter = std::accumulate(actionPots.begin(), actionPots.end(), Chips{0}, [](Chips total, const PotView& pot) {
+        return total + pot.amount;
+    });
+    recordedAction.currentBetAfter = currentBet_;
 }
 
 } // namespace bluffskill::poker

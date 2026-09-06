@@ -745,7 +745,9 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
     for (const auto& action : table.actionHistory) {
         history.append(QJsonObject{{"player", QString::fromStdString(action.player)}, {"seat", static_cast<int>(action.seat)},
             {"street", QString::fromUtf8(bluffskill::poker::toString(action.street))},
-            {"action", QString::fromUtf8(bluffskill::poker::toString(action.action))}, {"amount", static_cast<qint64>(action.amount)}});
+            {"action", QString::fromUtf8(bluffskill::poker::toString(action.action))}, {"amount", static_cast<qint64>(action.amount)},
+            {"stackAfter", static_cast<qint64>(action.stackAfter)}, {"pot", static_cast<qint64>(action.potAfter)},
+            {"currentBet", static_cast<qint64>(action.currentBetAfter)}});
     }
     QJsonObject legalActions;
     if (table.legalActions) {
@@ -756,7 +758,7 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
     }
     return {{"name", QString::fromStdString(table.name)}, {"sequence", static_cast<qint64>(table.eventSequence)},
         {"street", QString::fromUtf8(bluffskill::poker::toString(table.street))},
-        {"currentBet", static_cast<qint64>(table.currentBet)},
+        {"startingStack", static_cast<qint64>(table.startingStack)}, {"currentBet", static_cast<qint64>(table.currentBet)},
         {"smallBlind", static_cast<qint64>(table.smallBlind)}, {"bigBlind", static_cast<qint64>(table.bigBlind)},
         {"chipDenominations", chipDenominations},
         {"blindLevel", static_cast<qint64>(table.blindLevel)}, {"roundsPlayed", static_cast<qint64>(table.roundsPlayed)},

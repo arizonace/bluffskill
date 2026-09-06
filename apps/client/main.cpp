@@ -182,9 +182,6 @@ public:
         if (!previousStreet.isEmpty() && previousStreet != street_) clearActionBoxes();
         pot_ = 0;
         for (const auto& item : table.value("pots").toArray()) pot_ += item.toObject().value("amount").toInteger();
-        if (street_ != "Showdown") {
-            for (const auto wager : playerRoundCommitted_) pot_ -= wager;
-        }
         currentBet_ = table.value("currentBet").toInteger();
         showdownOccurred_ = table.value("showdownOccurred").toBool();
         const auto smallBlindSeat = table.value("smallBlindSeat").toInt();
@@ -236,6 +233,26 @@ public:
         update();
     }
 
+    void resetForRestart(qint64 startingStack) {
+        for (std::size_t index = 0; index < playerNames_.size(); ++index) {
+            if (!playerNames_[index].isEmpty()) playerStacks_[index] = startingStack;
+        }
+        playerCommitted_.fill(0);
+        playerRoundCommitted_.fill(0);
+        playerActing_.fill(false);
+        playerFolded_.fill(false);
+        playerPotWinnings_.fill(0);
+        playerNetWinnings_.fill(0);
+        clearActionBoxes();
+        communityCards_.clear();
+        pot_ = 0;
+        currentBet_ = 0;
+        street_ = "Preflop";
+        showdownOccurred_ = false;
+        presentedActingSeat_ = 0;
+        update();
+    }
+
     void showCommunityCards(QStringList cards) {
         const auto previousStreet = street_;
         communityCards_ = std::move(cards);
@@ -273,6 +290,18 @@ public:
         if (seat == 0 || seat > playerLastActions_.size()) return;
         if (action.compare("Fold", Qt::CaseInsensitive) == 0) playerFolded_[seat - 1] = true;
         playerLastActions_[seat - 1] = {.name = std::move(action), .amount = amount, .visible = true};
+        update();
+    }
+
+    void showActionState(qint64 pot, qint64 currentBet) {
+        pot_ = pot;
+        currentBet_ = currentBet;
+        update();
+    }
+
+    void showPlayerStack(std::size_t seat, qint64 stack) {
+        if (seat == 0 || seat > playerStacks_.size()) return;
+        playerStacks_[seat - 1] = stack;
         update();
     }
 
@@ -1255,12 +1284,12 @@ private:
         });
     }
 
-    void applyTableView(const QJsonObject& view) {
+    void applyTableView(const QJsonObject& view, bool restartPresentation = false) {
         const auto previousStreet = lastStreet_;
         const auto deferShowdownForAutomatedActions = view.value("street").toString() == "Showdown"
-            && (presentFinalAutomatedActions_ || humanPlayerBusted(view) || !humanPlayer_);
+            && (presentFinalAutomatedActions_ || humanPlayerBusted(view) || !humanPlayer_ || restartPresentation);
         if (deferShowdownForAutomatedActions) {
-            const auto presentingAutomatedActions = queueNewActionBoxes(view, previousStreet, true);
+            const auto presentingAutomatedActions = queueNewActionBoxes(view, previousStreet, true, restartPresentation);
             presentFinalAutomatedActions_ = false;
             if (presentingAutomatedActions) {
                 stopTurnCountdown();
@@ -1347,7 +1376,7 @@ private:
                 return;
             }
             const auto dealerDelayMilliseconds = !humanPlayer_
-                ? settings_.automatedPlayerDelayMilliseconds
+                ? settings_.uninterruptedDealerDelayMilliseconds
                 : humanPlayerBusted(view) ? settings_.uninterruptedDealerDelayMilliseconds
                 : settings_.dealClockSeconds * 1'000;
             if (lastShowdownSequence_ != tableSequence_) {
@@ -1390,7 +1419,8 @@ private:
     [[nodiscard]] static QString actionFingerprint(const QJsonObject& action) {
         return QString::number(action.value("seat").toInteger()) + '\x1f' + action.value("player").toString() + '\x1f'
             + action.value("street").toString() + '\x1f' + action.value("action").toString() + '\x1f'
-            + QString::number(action.value("amount").toInteger()) + '\x1f' + QString::number(action.value("stackAfter").toInteger());
+            + QString::number(action.value("amount").toInteger()) + '\x1f' + QString::number(action.value("stackAfter").toInteger())
+            + '\x1f' + QString::number(action.value("pot").toInteger()) + '\x1f' + QString::number(action.value("currentBet").toInteger());
     }
 
     [[nodiscard]] static QStringList communityCards(const QJsonObject& view) {
@@ -1414,7 +1444,8 @@ private:
         if (count >= 5) queueCommunityCardReveal(cards, 5, "River");
     }
 
-    bool queueNewActionBoxes(const QJsonObject& view, const QString& previousStreet, bool preserveShowdownAutomatedActions = false) {
+    bool queueNewActionBoxes(const QJsonObject& view, const QString& previousStreet, bool preserveShowdownAutomatedActions = false,
+        bool resetForRestart = false) {
         const auto history = view.value("actionHistory").toArray();
         const auto players = view.value("players").toArray();
         QStringList fingerprints;
@@ -1445,6 +1476,7 @@ private:
         }
         const auto cards = communityCards(view);
         if (preserveShowdownAutomatedActions) {
+            if (resetForRestart) pokerTable_->resetForRestart(view.value("startingStack").toInteger());
             pokerTable_->beginAutomatedActionReplay(newHand);
             if (newHand) {
                 presentedCommunityCards_.clear();
@@ -1454,6 +1486,21 @@ private:
             }
         }
         const auto firstUnpresentedAction = newHand ? qsizetype{0} : displayedActionHistoryCount_;
+        if (preserveShowdownAutomatedActions && firstUnpresentedAction == 0) {
+            for (const auto& blindValue : history) {
+                const auto blind = blindValue.toObject();
+                const auto actionName = blind.value("action").toString();
+                if (actionName != "Small Blind" && actionName != "Big Blind") continue;
+                pokerTable_->showPlayerStack(static_cast<std::size_t>(blind.value("seat").toInt()), blind.value("stackAfter").toInteger());
+            }
+            const auto bigBlind = std::ranges::find_if(history, [](const QJsonValue& value) {
+                return value.toObject().value("action").toString() == "Big Blind";
+            });
+            if (bigBlind != history.end()) {
+                const auto blind = bigBlind->toObject();
+                pokerTable_->showActionState(blind.value("pot").toInteger(), blind.value("currentBet").toInteger());
+            }
+        }
         for (qsizetype index = firstUnpresentedAction; index < history.size(); ++index) {
             const auto action = history.at(index).toObject();
             if (preserveShowdownAutomatedActions) {
@@ -1467,14 +1514,22 @@ private:
             const auto seat = static_cast<std::size_t>(action.value("seat").toInt());
             const auto playerName = action.value("player").toString();
             const auto amount = action.value("amount").toInteger();
+            const auto stackAfter = action.value("stackAfter").toInteger();
+            const auto pot = action.value("pot").toInteger();
+            const auto currentBet = action.value("currentBet").toInteger();
             const auto player = std::ranges::find_if(players, [seat](const QJsonValue& value) {
                 return static_cast<std::size_t>(value.toObject().value("seat").toInt()) == seat;
             });
             const auto reference = player != players.end()
                 && player->toObject().value("kind").toString() == "Reference";
             if (reference) automatedActionQueue_.append({.type = AutomatedActionPresentation::Type::playerAction,
-                .seat = seat, .player = playerName, .action = actionName, .amount = amount});
-            else pokerTable_->showLastAction(seat, actionName, amount);
+                .seat = seat, .player = playerName, .action = actionName, .amount = amount, .stackAfter = stackAfter,
+                .pot = pot, .currentBet = currentBet});
+            else {
+                pokerTable_->showLastAction(seat, actionName, amount);
+                pokerTable_->showPlayerStack(seat, stackAfter);
+                pokerTable_->showActionState(pot, currentBet);
+            }
         }
         if (preserveShowdownAutomatedActions) queueCommunityCardsThrough(cards, cards.size());
         displayedActionHistoryCount_ = history.size();
@@ -1500,6 +1555,8 @@ private:
         } else {
             pokerTable_->setPresentedActingSeat(action.seat);
             pokerTable_->showLastAction(action.seat, action.action, action.amount);
+            pokerTable_->showPlayerStack(action.seat, action.stackAfter);
+            pokerTable_->showActionState(action.pot, action.currentBet);
             statusBar()->showMessage(action.player + " " + action.action.toLower()
                 + (action.amount > 0 ? " " + QLocale().toString(action.amount) : "") + ".");
         }
@@ -1791,7 +1848,7 @@ private:
                 refreshTableView();
                 return;
             }
-            applyTableView(response);
+            applyTableView(response, true);
             statusBar()->showMessage("The server restarted the current table.");
         });
     }
@@ -2077,6 +2134,9 @@ private:
         QString player;
         QString action;
         qint64 amount{0};
+        qint64 stackAfter{0};
+        qint64 pot{0};
+        qint64 currentBet{0};
         QStringList communityCards;
     };
 

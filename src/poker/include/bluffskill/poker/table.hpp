@@ -95,12 +95,15 @@ struct ActionView {
     Action action{Action::check};
     Chips amount{0};
     Chips stackAfter{0}; // Player's remaining stack immediately after the action.
+    Chips potAfter{0}; // Total pot after the table applies this action.
+    Chips currentBetAfter{0}; // Largest current-round commitment after this action.
 };
 
 struct TableView {
     std::string name;
     std::uint64_t eventSequence{0};
     Street street{Street::waiting};
+    Chips startingStack{0};
     Chips currentBet{0}; // Largest commitment in the active betting round.
     Chips smallBlind{0};
     Chips bigBlind{0};

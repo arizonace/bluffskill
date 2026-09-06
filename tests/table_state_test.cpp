@@ -36,6 +36,8 @@ int main() {
     assert(publicView.actionHistory[1].action == Action::bigBlind);
     assert(publicView.actionHistory[1].amount == 50);
     assert(publicView.actionHistory[1].stackAfter == 150);
+    assert(publicView.actionHistory[1].potAfter == 75);
+    assert(publicView.actionHistory[1].currentBetAfter == 50);
     assert(publicView.players.front().holeCards.empty());
     assert(aliceView.players.front().holeCards.size() == 2);
     assert(aliceView.legalActions && aliceView.legalActions->call);
@@ -53,6 +55,8 @@ int main() {
     const auto botOneTurn = table.viewFor("BotOne");
     assert(botOneTurn.actionHistory.back().action == Action::call);
     assert(botOneTurn.actionHistory.back().stackAfter == 0);
+    assert(botOneTurn.actionHistory.back().potAfter == 125);
+    assert(botOneTurn.actionHistory.back().currentBetAfter == 50);
     assert(botOneTurn.actingSeat == 2);
     assert(botOneTurn.legalActions && botOneTurn.legalActions->raise);
     assert((botOneTurn.chipDenominations == ChipDenominations{25, 100, 500, 1000}));
