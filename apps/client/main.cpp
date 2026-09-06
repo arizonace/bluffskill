@@ -1258,7 +1258,7 @@ private:
     void applyTableView(const QJsonObject& view) {
         const auto previousStreet = lastStreet_;
         const auto deferShowdownForAutomatedActions = view.value("street").toString() == "Showdown"
-            && (presentFinalAutomatedActions_ || humanPlayerBusted(view));
+            && (presentFinalAutomatedActions_ || humanPlayerBusted(view) || !humanPlayer_);
         if (deferShowdownForAutomatedActions) {
             const auto presentingAutomatedActions = queueNewActionBoxes(view, previousStreet, true);
             presentFinalAutomatedActions_ = false;
@@ -1346,8 +1346,10 @@ private:
                 statusBar()->showMessage("Table winner: " + tableWinner + ". The game is complete. Choose Game → Restart Game to play again.");
                 return;
             }
-            const auto dealerDelayMilliseconds = humanPlayerBusted(view)
-                ? settings_.uninterruptedDealerDelayMilliseconds : settings_.dealClockSeconds * 1'000;
+            const auto dealerDelayMilliseconds = !humanPlayer_
+                ? settings_.automatedPlayerDelayMilliseconds
+                : humanPlayerBusted(view) ? settings_.uninterruptedDealerDelayMilliseconds
+                : settings_.dealClockSeconds * 1'000;
             if (lastShowdownSequence_ != tableSequence_) {
                 lastShowdownSequence_ = tableSequence_;
                 beginNextDealCountdown(dealerDelayMilliseconds);
