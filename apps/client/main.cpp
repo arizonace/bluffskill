@@ -770,13 +770,16 @@ private:
 struct CustomGameConfiguration {
     bool includeHuman{true};
     QString playerName;
-    int leoPlayers{5};
-    int virgoPlayers{4};
+    struct ReferencePlayerCount {
+        QString type;
+        int count{0};
+    };
+    QVector<ReferencePlayerCount> referencePlayers;
 };
 
 class CustomGameDialog final : public QDialog {
 public:
-    explicit CustomGameDialog(const QString& defaultPlayerName, QWidget* parent = nullptr) : QDialog(parent) {
+    explicit CustomGameDialog(const QString& defaultPlayerName, const QVector<QString>& referencePlayerTypes, QWidget* parent = nullptr) : QDialog(parent) {
         setWindowTitle("Custom Game");
         auto* layout = new QVBoxLayout(this);
         layout->addWidget(new QLabel("Choose exactly 10 players for this table.", this));
@@ -784,13 +787,18 @@ public:
         includeHuman_ = new QCheckBox("Include local human player", this);
         includeHuman_->setChecked(true);
         playerName_ = new QLineEdit(defaultPlayerName, this);
-        leoPlayers_ = new QSpinBox(this); leoPlayers_->setRange(0, defaultTableSeats); leoPlayers_->setValue(5);
-        virgoPlayers_ = new QSpinBox(this); virgoPlayers_->setRange(0, defaultTableSeats); virgoPlayers_->setValue(4);
         total_ = new QLabel(this);
         form->addRow("Human player", includeHuman_);
         form->addRow("Player name", playerName_);
-        form->addRow("Leo players", leoPlayers_);
-        form->addRow("Virgo players", virgoPlayers_);
+        for (const auto& type : referencePlayerTypes) {
+            auto* count = new QSpinBox(this);
+            count->setRange(0, defaultTableSeats);
+            if (type == "Leo") count->setValue(5);
+            if (type == "Virgo") count->setValue(4);
+            referencePlayers_.append({.type = type, .count = count});
+            form->addRow(type + " players", count);
+            connect(count, qOverload<int>(&QSpinBox::valueChanged), this, [this] { updateState(); });
+        }
         form->addRow("Total", total_);
         layout->addLayout(form);
         buttons_ = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
@@ -798,21 +806,23 @@ public:
         connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject);
         connect(includeHuman_, &QCheckBox::toggled, this, [this] { updateState(); });
         connect(playerName_, &QLineEdit::textChanged, this, [this] { updateState(); });
-        connect(leoPlayers_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { updateState(); });
-        connect(virgoPlayers_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { updateState(); });
         layout->addWidget(buttons_);
         updateState();
     }
 
     [[nodiscard]] CustomGameConfiguration configuration() const {
-        return {.includeHuman = includeHuman_->isChecked(), .playerName = playerName_->text().trimmed(),
-            .leoPlayers = leoPlayers_->value(), .virgoPlayers = virgoPlayers_->value()};
+        CustomGameConfiguration configuration{.includeHuman = includeHuman_->isChecked(), .playerName = playerName_->text().trimmed()};
+        for (const auto& player : referencePlayers_) {
+            configuration.referencePlayers.append({.type = player.type, .count = player.count->value()});
+        }
+        return configuration;
     }
 
 private:
     void updateState() {
         playerName_->setEnabled(includeHuman_->isChecked());
-        const auto total = (includeHuman_->isChecked() ? 1 : 0) + leoPlayers_->value() + virgoPlayers_->value();
+        auto total = includeHuman_->isChecked() ? 1 : 0;
+        for (const auto& player : referencePlayers_) total += player.count->value();
         const auto valid = total == defaultTableSeats && (!includeHuman_->isChecked() || !playerName_->text().trimmed().isEmpty());
         total_->setText(QString::number(total) + " / " + QString::number(defaultTableSeats));
         total_->setStyleSheet(valid ? QString{} : QStringLiteral("color: #B00020;"));
@@ -821,8 +831,11 @@ private:
 
     QCheckBox* includeHuman_{};
     QLineEdit* playerName_{};
-    QSpinBox* leoPlayers_{};
-    QSpinBox* virgoPlayers_{};
+    struct ReferencePlayerControl {
+        QString type;
+        QSpinBox* count{};
+    };
+    QVector<ReferencePlayerControl> referencePlayers_;
     QLabel* total_{};
     QDialogButtonBox* buttons_{};
 };
@@ -1121,6 +1134,12 @@ private:
             connected_ = true;
             autoConnectInProgress_ = false;
             serverUrl_ = baseUrl;
+            availableReferencePlayerTypes_.clear();
+            for (const auto& value : body.value("referencePlayerTypes").toArray()) {
+                const auto type = value.toString();
+                if (!type.isEmpty()) availableReferencePlayerTypes_.append(type);
+            }
+            if (availableReferencePlayerTypes_.isEmpty()) availableReferencePlayerTypes_ = {"Leo", "Virgo"};
             clearHumanPlayer();
             server_->setEnabled(true);
             server_->clear();
@@ -1903,7 +1922,7 @@ private:
 
     void customGame() {
         if (!connected_) return;
-        CustomGameDialog dialog(settings_.defaultPlayerName, this);
+        CustomGameDialog dialog(settings_.defaultPlayerName, availableReferencePlayerTypes_, this);
         if (dialog.exec() != QDialog::Accepted) return;
         const auto configuration = dialog.configuration();
         if (configuration.includeHuman) {
@@ -1914,7 +1933,7 @@ private:
             clearHumanPlayer();
         }
 
-        auto referenceTypes = referencePlayerTypes(configuration.leoPlayers, configuration.virgoPlayers);
+        auto referenceTypes = referencePlayerTypes(configuration.referencePlayers);
         const auto humanSeat = configuration.includeHuman ? QRandomGenerator::global()->bounded(1, defaultTableSeats + 1) : 0;
         QVector<QString> referencesBeforeHuman;
         QVector<QString> referencesAfterHuman;
@@ -1952,8 +1971,7 @@ private:
                     }
                     setNewGameActionsEnabled(true);
                     statusBar()->showMessage("Created " + competitionName + " with "
-                        + QString::number(configuration.leoPlayers) + " Leo and "
-                        + QString::number(configuration.virgoPlayers) + " Virgo reference players.");
+                        + QString::number(defaultTableSeats) + " reference players.");
                     refreshCompetitions(competitionName);
                 });
         });
@@ -1974,11 +1992,11 @@ private:
         return types;
     }
 
-    [[nodiscard]] static QVector<QString> referencePlayerTypes(int leoPlayers, int virgoPlayers) {
+    [[nodiscard]] static QVector<QString> referencePlayerTypes(const QVector<CustomGameConfiguration::ReferencePlayerCount>& players) {
         QVector<QString> types;
-        types.reserve(leoPlayers + virgoPlayers);
-        for (int index = 0; index < leoPlayers; ++index) types.append("Leo");
-        for (int index = 0; index < virgoPlayers; ++index) types.append("Virgo");
+        for (const auto& player : players) {
+            for (int index = 0; index < player.count; ++index) types.append(player.type);
+        }
         for (int index = types.size() - 1; index > 0; --index) {
             std::swap(types[index], types[QRandomGenerator::global()->bounded(index + 1)]);
         }
@@ -2145,6 +2163,7 @@ private:
     QSet<QNetworkReply*> activeReplies_;
     QNetworkReply* healthReply_{};
     QUrl serverUrl_;
+    QVector<QString> availableReferencePlayerTypes_;
     std::uint64_t connectionGeneration_{};
     std::uint64_t tableRequestGeneration_{};
     std::uint64_t tableViewRequestGeneration_{};

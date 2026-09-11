@@ -41,6 +41,7 @@ int main() {
     std::mt19937_64 stableRandom{7};
     // The archived August policy remains deterministic for its established cases.
     AugustLeoReferencePlayer bold{"Bold", {.riskTolerance = 1.0, .optimism = 1.0, .variability = 0.0}};
+    assert(bold.referenceType() == ReferencePlayerType::augustLeo);
     const auto boldDecision = bold.chooseResponse(aces, stableRandom);
     assert(boldDecision.action == Action::raise);
     assert(boldDecision.amount >= 200 && boldDecision.amount <= 1000);
@@ -58,12 +59,13 @@ int main() {
     }
 
     AugustVirgoReferencePlayer virgo{"Virgo", {.curiosity = 1.0, .hope = 1.0, .empathy = 0.5, .longevity = 0.5}};
+    assert(virgo.referenceType() == ReferencePlayerType::augustVirgo);
     const auto virgoView = privateTurn("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
     std::mt19937_64 virgoRandom{7};
     const auto virgoDecision = virgo.chooseResponse(virgoView, virgoRandom);
     assert(virgoDecision.action == Action::call || virgoDecision.action == Action::raise || virgoDecision.action == Action::fold);
     if (virgoDecision.action == Action::raise) assert(virgoDecision.amount >= 200 && virgoDecision.amount <= 1000 && virgoDecision.amount % 25 == 0);
-    assert(virgo.referenceType() == ReferencePlayerType::virgo);
+    assert(virgo.referenceType() == ReferencePlayerType::augustVirgo);
     assert(virgo.parameters().size() == 4);
 
     auto legacyStrongFlop = checkedFlop("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});

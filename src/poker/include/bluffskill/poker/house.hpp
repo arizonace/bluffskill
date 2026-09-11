@@ -49,6 +49,9 @@ public:
     [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
     [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
+    // Types are registered with their server-side factories. Adapters use this
+    // list rather than carrying their own type list.
+    [[nodiscard]] std::vector<ReferencePlayerType> referencePlayerTypes() const;
     [[nodiscard]] TableView tableView(std::string_view competitionName, std::string_view tableName, std::string_view viewerName = {}) const;
     // Server-console inspection only. REST adapters must never project bot profiles.
     [[nodiscard]] std::optional<ReferencePlayerInspection> referencePlayerInspection(

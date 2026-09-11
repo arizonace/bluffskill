@@ -16,7 +16,7 @@ class AugustLeoReferencePlayer final : public ReferencePlayerController {
 public:
     AugustLeoReferencePlayer(std::string name, AugustLeoReferencePlayerProfile profile);
 
-    [[nodiscard]] ReferencePlayerType referenceType() const noexcept override { return ReferencePlayerType::leo; }
+    [[nodiscard]] ReferencePlayerType referenceType() const noexcept override { return ReferencePlayerType::augustLeo; }
     [[nodiscard]] const AugustLeoReferencePlayerProfile& profile() const noexcept { return profile_; }
     [[nodiscard]] std::vector<ReferencePlayerParameter> parameters() const override;
     [[nodiscard]] ReferenceDecision chooseResponse(const TableView& privateView, std::mt19937_64& random) const override;

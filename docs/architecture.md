@@ -22,7 +22,7 @@ Qt client / CLI / reference bot
 
 `src/cards` is portable C++ with no Qt dependency and can serve bridge, blackjack, or another card game. `src/poker` depends on that library, remains portable C++, and will contain all poker rules. Qt lives only at the application edge. Network code must translate JSON to typed commands; it must never mutate a `Table` directly.
 
-Reference players are in-process `ReferencePlayerController` implementations. The controller interface exposes a player type, private diagnostic parameters for the server console, and a decision method that consumes only that controller's private `TableView`. Leo and Virgo are separate implementations and may occupy the same table. The `August*ReferencePlayer` classes retain the prior policies as regression baselines; the default Leo and Virgo classes are the actively improved policies. Adding another type requires a new controller implementation plus its server factory registration; it does not change poker rules or adapters.
+Reference players are in-process `ReferencePlayerController` implementations. The controller interface exposes a player type, private diagnostic parameters for the server console, and a decision method that consumes only that controller's private `TableView`. Leo and Virgo are separate implementations and may occupy the same table. The `August*ReferencePlayer` classes retain the prior policies as regression baselines; the default Leo and Virgo classes are the actively improved policies. Adding another type requires a new controller implementation plus its server factory registration; that registration automatically advertises the type to custom-game clients, without changing poker rules or adapters.
 
 ## Runtime responsibilities
 
@@ -42,7 +42,7 @@ For the first playable slice, serialize only at clean hand boundaries. Mid-hand 
 
 ## Public and private views
 
-The engine produces a `TableView` for each viewer rather than exposing domain objects. A public view has community cards, shown cards, stack totals, action history, pot/side-pot eligibility, dealer button, and acting seat. A player view additionally has that player’s hole cards. Internal deck order, folded hole cards, opponents’ hole cards, bot parameters, and secrets never cross this boundary. The trusted server console may request the folding player's own projection solely to place those cards in its non-displayed local action-log export field; it must not add them to a public view, REST response, or client UI.
+The engine produces a `TableView` for each viewer rather than exposing domain objects. A public view has community cards, shown cards, stack totals, action history, pot/side-pot eligibility, dealer button, and acting seat. A player view additionally has that player’s hole cards. Internal deck order, folded hole cards, opponents’ hole cards, bot parameters, and secrets never cross this boundary. The trusted server console may request the folding player's own projection solely to place those cards in its local action-log `Hand` field; it must not add them to a public view, REST response, or client UI.
 
 ## API evolution
 

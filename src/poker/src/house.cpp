@@ -1,5 +1,7 @@
 #include "bluffskill/poker/house.hpp"
 #include "bluffskill/poker/api_player.hpp"
+#include "bluffskill/poker/august_leo_reference_player.hpp"
+#include "bluffskill/poker/august_virgo_reference_player.hpp"
 #include "bluffskill/poker/leo_reference_player.hpp"
 #include "bluffskill/poker/reference_player.hpp"
 #include "bluffskill/poker/virgo_reference_player.hpp"
@@ -57,6 +59,48 @@ std::string normalizeName(std::string_view value) {
     for (const auto character : value) normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
     return normalized;
 }
+
+using ReferencePlayerFactory = std::unique_ptr<ReferencePlayerController> (*)(std::string, std::mt19937_64&);
+
+struct ReferencePlayerRegistration {
+    ReferencePlayerType type;
+    ReferencePlayerFactory create;
+};
+
+std::unique_ptr<ReferencePlayerController> createLeo(std::string name, std::mt19937_64& random) {
+    std::uniform_real_distribution<double> disposition(0.15, 0.85);
+    return std::make_unique<LeoReferencePlayer>(std::move(name), LeoReferencePlayerProfile{
+        .riskTolerance = disposition(random), .optimism = disposition(random), .variability = disposition(random),
+    });
+}
+
+std::unique_ptr<ReferencePlayerController> createAugustLeo(std::string name, std::mt19937_64& random) {
+    std::uniform_real_distribution<double> disposition(0.15, 0.85);
+    return std::make_unique<AugustLeoReferencePlayer>(std::move(name), AugustLeoReferencePlayerProfile{
+        .riskTolerance = disposition(random), .optimism = disposition(random), .variability = disposition(random),
+    });
+}
+
+std::unique_ptr<ReferencePlayerController> createVirgo(std::string name, std::mt19937_64& random) {
+    std::uniform_real_distribution<double> disposition(0.15, 0.85);
+    return std::make_unique<VirgoReferencePlayer>(std::move(name), VirgoReferencePlayerProfile{
+        .curiosity = disposition(random), .hope = disposition(random), .empathy = disposition(random), .longevity = disposition(random),
+    });
+}
+
+std::unique_ptr<ReferencePlayerController> createAugustVirgo(std::string name, std::mt19937_64& random) {
+    std::uniform_real_distribution<double> disposition(0.15, 0.85);
+    return std::make_unique<AugustVirgoReferencePlayer>(std::move(name), AugustVirgoReferencePlayerProfile{
+        .curiosity = disposition(random), .hope = disposition(random), .empathy = disposition(random), .longevity = disposition(random),
+    });
+}
+
+constexpr std::array referencePlayerRegistrations{
+    ReferencePlayerRegistration{ReferencePlayerType::leo, createLeo},
+    ReferencePlayerRegistration{ReferencePlayerType::augustLeo, createAugustLeo},
+    ReferencePlayerRegistration{ReferencePlayerType::virgo, createVirgo},
+    ReferencePlayerRegistration{ReferencePlayerType::augustVirgo, createAugustVirgo},
+};
 
 } // namespace
 
@@ -169,7 +213,8 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
         throw std::invalid_argument("reference-player count does not fit the available seats");
     }
 
-    std::uniform_real_distribution<double> disposition(0.15, 0.85);
+    const auto registration = std::ranges::find(referencePlayerRegistrations, type, &ReferencePlayerRegistration::type);
+    if (registration == referencePlayerRegistrations.end()) throw std::invalid_argument("reference-player type is not registered");
     for (std::size_t index = 0; index < count; ++index) {
         std::size_t tableIndex = 0;
         std::optional<std::size_t> seat;
@@ -178,19 +223,7 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
         }
         if (!seat) throw std::runtime_error("could not find a free seat");
         const auto playerName = nextReferencePlayerName(competition);
-        std::unique_ptr<ReferencePlayerController> referencePlayer;
-        switch (type) {
-        case ReferencePlayerType::leo:
-            referencePlayer = std::make_unique<LeoReferencePlayer>(playerName, LeoReferencePlayerProfile{
-                .riskTolerance = disposition(random_), .optimism = disposition(random_), .variability = disposition(random_),
-            });
-            break;
-        case ReferencePlayerType::virgo:
-            referencePlayer = std::make_unique<VirgoReferencePlayer>(playerName, VirgoReferencePlayerProfile{
-                .curiosity = disposition(random_), .hope = disposition(random_), .empathy = disposition(random_), .longevity = disposition(random_),
-            });
-            break;
-        }
+        auto referencePlayer = registration->create(playerName, random_);
         competition.players.push_back({
             .player = std::move(referencePlayer),
             .tableIndex = tableIndex - 1,
@@ -259,6 +292,13 @@ std::optional<CompetitionSummary> House::competition(std::string_view name) cons
     const auto* found = findCompetition(name);
     if (found == nullptr) return std::nullopt;
     return summaryOf(*found);
+}
+
+std::vector<ReferencePlayerType> House::referencePlayerTypes() const {
+    std::vector<ReferencePlayerType> types;
+    types.reserve(referencePlayerRegistrations.size());
+    for (const auto& registration : referencePlayerRegistrations) types.push_back(registration.type);
+    return types;
 }
 
 TableView House::tableView(std::string_view competitionName, std::string_view tableName, std::string_view viewerName) const {

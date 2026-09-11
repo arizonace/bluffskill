@@ -7,7 +7,7 @@
 namespace bluffskill::poker {
 
 enum class PlayerKind { api, reference };
-enum class ReferencePlayerType { leo, virgo };
+enum class ReferencePlayerType { leo, augustLeo, virgo, augustVirgo };
 
 // A player is an identity. How it chooses an action belongs to a controller implementation.
 class Player {

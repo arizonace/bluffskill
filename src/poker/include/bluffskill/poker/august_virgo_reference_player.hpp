@@ -17,7 +17,7 @@ class AugustVirgoReferencePlayer final : public ReferencePlayerController {
 public:
     AugustVirgoReferencePlayer(std::string name, AugustVirgoReferencePlayerProfile profile);
 
-    [[nodiscard]] ReferencePlayerType referenceType() const noexcept override { return ReferencePlayerType::virgo; }
+    [[nodiscard]] ReferencePlayerType referenceType() const noexcept override { return ReferencePlayerType::augustVirgo; }
     [[nodiscard]] const AugustVirgoReferencePlayerProfile& profile() const noexcept { return profile_; }
     [[nodiscard]] std::vector<ReferencePlayerParameter> parameters() const override;
     [[nodiscard]] ReferenceDecision chooseResponse(const TableView& privateView, std::mt19937_64& random) const override;

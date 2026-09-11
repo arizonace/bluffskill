@@ -17,11 +17,11 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 | `POST` | `/v1/competitions/{competition}/tables/{table}/restart` | reset stacks and begin a new hand on the existing table; body may name the response viewer |
 | `GET` | `/v1/competitions/{competition}/events` | stream view-projected notifications |
 
-Each table in the table-list response includes `maximumSeats` and a `players` array. Every player entry has a one-based `seat`, name, and player kind; a player may be added to a competition only when it is assigned to a free table seat.
+`GET /v1/health` includes `referencePlayerTypes`, the server's registered reference-player names. Clients use it to build Custom Game selection controls, rather than maintaining a type list of their own. Each table in the table-list response includes `maximumSeats` and a `players` array. Every player entry has a one-based `seat`, name, and player kind; a player may be added to a competition only when it is assigned to a free table seat.
 
 `POST /v1/competitions/{competition}/tables/{table}/players` accepts only an API player name. The server constructs an `ApiPlayer` and deliberately has no human/bot/GUI field: a human client and an automated remote client are indistinguishable to it.
 
-`POST /v1/competitions/{competition}/reference-players` accepts a positive `count` and an optional `type`: `Leo` (the backward-compatible default) or `Virgo`. Requests may be repeated with different types to seat a mixture of reference players at the same table. Player entries in competition and table-list responses retain `kind: "Reference"` and add `referenceType: "Leo"` or `"Virgo"`; profile values never leave the server console.
+`POST /v1/competitions/{competition}/reference-players` accepts a positive `count` and an optional `type`: `Leo` remains the backward-compatible default, while the accepted names are those advertised by `GET /v1/health` (currently `Leo`, `August Leo`, `Virgo`, and `August Virgo`). Requests may be repeated with different types to seat a mixture of reference players at the same table. Player entries in competition and table-list responses retain `kind: "Reference"` and add the selected `referenceType`; profile values never leave the server console.
 
 Creation request example:
 
@@ -74,7 +74,7 @@ TLS protects transport confidentiality and integrity, but does not make a replay
 2. Issue a short-lived, audience-bound access token and a rotating refresh token in secure, HttpOnly cookies or OS secure storage.
 3. Bind each command to its authenticated player identity, table, `expectedSequence`, request ID, UTC expiry, and body digest.
 4. For higher assurance program clients, require OAuth 2.1 DPoP or mTLS, using established libraries and audited key storage. Verify the proof’s method/URL, token binding, nonce, expiry, and replay identifier.
-5. Rate-limit identity and IP; log accepted/rejected command metadata without logging tokens, hole cards, deck order, or secret material. A user-requested server-console action-log export is separate from operational security logging: it retains a folding player's cards for hand review, must remain local/private, and must never be served through an API or client UI.
+5. Rate-limit identity and IP; log accepted/rejected command metadata without logging tokens, hole cards, deck order, or secret material. A user-requested server-console action-log export is separate from operational security logging: it retains a folding player's cards for hand review in the fold row's `hand` value, must remain local/private, and must never be served through an API or client UI.
 
 Sign server notifications with the TLS session in the normal case. If messages pass through an intermediary, use an established JWS/COSE implementation with rotating server keys and publish the verification key set. Never invent a custom MAC block, expose a symmetric client secret to a browser/client, or rely on a timestamp alone for replay protection.
 

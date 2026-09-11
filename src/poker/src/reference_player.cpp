@@ -13,7 +13,9 @@ std::string_view toString(PlayerKind kind) noexcept {
 std::string_view toString(ReferencePlayerType type) noexcept {
     switch (type) {
     case ReferencePlayerType::leo: return "Leo";
+    case ReferencePlayerType::augustLeo: return "August Leo";
     case ReferencePlayerType::virgo: return "Virgo";
+    case ReferencePlayerType::augustVirgo: return "August Virgo";
     }
     return "Unknown";
 }

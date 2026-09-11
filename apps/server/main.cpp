@@ -255,11 +255,8 @@ private:
         qint64 lastBigBlind{0};
     };
 
-    static constexpr int actionLogHoleCardsRole = Qt::UserRole + 1;
-
     void appendActionLogRow(const QString& player, const QString& kind, const QString& street, const QString& round, const QString& action,
-        const QString& value = {}, const QString& stack = {}, const QString& gain = {}, const QString& pot = {}, const QString& hand = {},
-        const QString& hiddenHoleCards = {}) {
+        const QString& value = {}, const QString& stack = {}, const QString& gain = {}, const QString& pot = {}, const QString& hand = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
         actionLog_->setItem(row, 0, new QTableWidgetItem(player));
@@ -273,7 +270,6 @@ private:
         actionLog_->setItem(row, 8, new QTableWidgetItem(pot));
         actionLog_->setItem(row, 9, new QTableWidgetItem(hand));
         actionLog_->item(row, 0)->setData(Qt::UserRole, activeActionLogTableKey_);
-        actionLog_->item(row, 0)->setData(actionLogHoleCardsRole, hiddenHoleCards);
         actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
     }
 
@@ -389,8 +385,7 @@ private:
                 {"stack", actionLog_->item(row, 6)->text()},
                 {"gain", actionLog_->item(row, 7)->text()},
                 {"pot", actionLog_->item(row, 8)->text()},
-                {"hand", actionLog_->item(row, 9)->text()},
-                {"holeCards", player->data(actionLogHoleCardsRole).toString()}});
+                {"hand", actionLog_->item(row, 9)->text()}});
         }
         return actions;
     }
@@ -437,7 +432,7 @@ private:
     }
 
     bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
-        QString csv = "Index,Player,Kind,Street,Round,Action,Value,Stack,Gain,Pot,Hand,Hole Cards\n";
+        QString csv = "Index,Player,Kind,Street,Round,Action,Value,Stack,Gain,Pot,Hand\n";
         int serializedIndex = 1;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
             const auto* player = actionLog_->item(row, 0);
@@ -448,7 +443,6 @@ private:
                 const auto* item = actionLog_->item(row, column);
                 csv += csvCell(item == nullptr ? QString{} : item->text());
             }
-            csv += ',' + csvCell(player->data(actionLogHoleCardsRole).toString());
             csv += '\n';
         }
         return writeFile(withSuffix(path, "csv"), csv.toUtf8(), "Action Log CSV");
@@ -636,7 +630,7 @@ private:
                         ? foldedHoleCardsForLog(competition.name, table.name, action.player) : QString{};
                     appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
                         round, QString::fromUtf8(bluffskill::poker::toString(action.action)), value, QLocale().toString(action.stackAfter), gain,
-                        QLocale().toString(action.potAfter), actionAnnotations(view, static_cast<std::size_t>(index)), holeCards);
+                        QLocale().toString(action.potAfter), folded ? holeCards : actionAnnotations(view, static_cast<std::size_t>(index)));
                 }
                 appendCommunityCardLogRows(view, cursor, view.communityCards.size());
                 if (view.street == bluffskill::poker::Street::showdown) {
@@ -834,10 +828,27 @@ std::optional<bluffskill::poker::Action> parseAction(const QString& value) {
     return std::nullopt;
 }
 
-std::optional<bluffskill::poker::ReferencePlayerType> parseReferencePlayerType(const QString& value) {
-    if (value.isEmpty() || value.compare("Leo", Qt::CaseInsensitive) == 0) return bluffskill::poker::ReferencePlayerType::leo;
-    if (value.compare("Virgo", Qt::CaseInsensitive) == 0) return bluffskill::poker::ReferencePlayerType::virgo;
+QJsonArray referencePlayerTypesJson(const bluffskill::poker::House& house) {
+    QJsonArray types;
+    for (const auto type : house.referencePlayerTypes()) types.append(QString::fromUtf8(bluffskill::poker::toString(type)));
+    return types;
+}
+
+std::optional<bluffskill::poker::ReferencePlayerType> parseReferencePlayerType(const QString& value,
+    const bluffskill::poker::House& house) {
+    if (value.isEmpty()) return bluffskill::poker::ReferencePlayerType::leo;
+    const auto types = house.referencePlayerTypes();
+    const auto type = std::ranges::find_if(types, [&value](const auto candidate) {
+        return value.compare(QString::fromUtf8(bluffskill::poker::toString(candidate)), Qt::CaseInsensitive) == 0;
+    });
+    if (type != types.end()) return *type;
     return std::nullopt;
+}
+
+QString referencePlayerTypeNames(const bluffskill::poker::House& house) {
+    QStringList names;
+    for (const auto type : house.referencePlayerTypes()) names.append(QString::fromUtf8(bluffskill::poker::toString(type)));
+    return names.join(", ");
 }
 
 } // namespace
@@ -852,7 +863,7 @@ int main(int argc, char* argv[]) {
 
     server.route("/v1/health", [&window] {
         window.log("GET /v1/health → 200");
-        return QHttpServerResponse(QJsonObject{{"status", "ok"}});
+        return QHttpServerResponse(QJsonObject{{"status", "ok"}, {"referencePlayerTypes", referencePlayerTypesJson(window.house())}});
     });
 
     server.route("/v1/competitions", QHttpServerRequest::Method::Post,
@@ -987,10 +998,10 @@ int main(int argc, char* argv[]) {
     server.route("/v1/competitions/<arg>/reference-players", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QHttpServerRequest& request) -> QHttpServerResponse {
             const auto json = QJsonDocument::fromJson(request.body()).object();
-            const auto type = parseReferencePlayerType(json.value("type").toString());
+            const auto type = parseReferencePlayerType(json.value("type").toString(), window.house());
             if (!type) {
                 window.log("POST /v1/competitions/" + competitionName + "/reference-players → 400");
-                return QHttpServerResponse(QJsonObject{{"error", "type must be Leo or Virgo"}}, QHttpServerResponder::StatusCode::BadRequest);
+                return QHttpServerResponse(QJsonObject{{"error", "type must be one of: " + referencePlayerTypeNames(window.house())}}, QHttpServerResponder::StatusCode::BadRequest);
             }
             try {
                 const auto competition = window.house().createReferencePlayers(

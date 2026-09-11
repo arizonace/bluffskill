@@ -2,9 +2,16 @@
 
 #include <cassert>
 #include <set>
+#include <vector>
 
 int main() {
     bluffskill::poker::House house;
+    assert((house.referencePlayerTypes() == std::vector<bluffskill::poker::ReferencePlayerType>{
+        bluffskill::poker::ReferencePlayerType::leo,
+        bluffskill::poker::ReferencePlayerType::augustLeo,
+        bluffskill::poker::ReferencePlayerType::virgo,
+        bluffskill::poker::ReferencePlayerType::augustVirgo,
+    }));
     const auto created = house.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7000});
     const auto populated = house.createReferencePlayers(created.name, 6);
     assert(populated.tables.front().players.size() == 6);
@@ -43,6 +50,20 @@ int main() {
         mixedNames.insert(mixed.tables.front().players[index].player.name);
     }
     assert(mixedNames.size() == 9);
+
+    bluffskill::poker::House allTypesHouse;
+    const auto allTypesCompetition = allTypesHouse.createSingleTableTournament({.maximumPlayers = 4, .startingStack = 7'000});
+    for (const auto type : allTypesHouse.referencePlayerTypes()) {
+        [[maybe_unused]] const auto populatedType = allTypesHouse.createReferencePlayers(allTypesCompetition.name, 1, type);
+    }
+    const auto allTypes = allTypesHouse.competition(allTypesCompetition.name);
+    assert(allTypes && allTypes->tables.front().players.size() == 4);
+    for (std::size_t index = 0; index < allTypes->tables.front().players.size(); ++index) {
+        const auto& player = allTypes->tables.front().players[index].player;
+        assert(player.referenceType == allTypesHouse.referencePlayerTypes()[index]);
+        const auto inspection = allTypesHouse.referencePlayerInspection(allTypesCompetition.name, "Red", player.name);
+        assert(inspection && inspection->type == *player.referenceType);
+    }
 
     bluffskill::poker::House stagedHouse;
     const auto staged = stagedHouse.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7'000});
