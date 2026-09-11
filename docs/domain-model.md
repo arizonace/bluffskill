@@ -18,15 +18,16 @@ The initial prototype uses one `TournamentCompetition`, one `Table`, at most ten
 | `Pot` / `SidePot` | amount and eligible seats, derived from committed amounts |
 | `PlayerController` | adapter interface for human/API/bot decisions; not the player identity |
 | `ReferencePlayerController` | private in-process bot-controller interface: type, console-only parameters, and legal decision selection |
-| `LeoReferencePlayer` | assertive reference policy with risk tolerance, optimism, and variability |
-| `VirgoReferencePlayer` | board-aware reference policy with curiosity, hope, empathy, and longevity |
+| `AugustLeoReferencePlayer` / `AugustVirgoReferencePlayer` | preserved September 2026 policies for baseline and regression comparison |
+| `LeoReferencePlayer` | assertive policy using made-hand strength, draws, pot odds, public pressure, and pot-relative sizing |
+| `VirgoReferencePlayer` | selective policy using made-hand strength, draws, pot odds, public threat, and measured value/protection bets |
 | `Dealer` | automated system actor that advances forced operations |
 
 Use integer chip units (`std::int64_t`) rather than floating point. Every competition has a sorted, positive list of chip denominations; each denomination must be an integer multiple of the preceding denomination. Its smallest denomination is the wagering unit: starting stacks, forced blinds, bets, raises, and awarded pots must be exact multiples of it. This preserves chip-representable stacks even when an odd chip is assigned while splitting a pot. The initial default is `25, 100, 500, 1000`; server configuration may replace it before a competition is created. The starting small blind defaults to one smallest chip, and the big blind is twice the configured small blind. Betting legality and pots otherwise operate on integer value, which keeps future currencies and tournament rebuy rules manageable.
 
 The no-limit raise floor is the previous full bet or raise: the big blind begins each preflop round as the opening bet, an opening bet must be at least the big blind, and every full raise must add at least the size of the preceding full bet or raise. A player whose maximum commitment is below that floor may raise only by committing their entire remaining stack; that short all-in does not establish a new full-raise amount.
 
-Reference-player type is public seat metadata (`Leo` or `Virgo`), while profile values and decision calculations remain server-private. Leo preserves the existing direct confidence policy. Virgo estimates opponent threat from public board texture, active-opponent count, and current-street betting actions; it weighs that estimate against its own made hand, draw potential, call pressure, and its four profile parameters. Neither policy receives opponents' hole cards or bypasses `Table` action validation.
+Reference-player type is public seat metadata (`Leo` or `Virgo`), while profile values and decision calculations remain server-private. The default Leo and Virgo policies share a showdown-aware hand estimate, draw detection, public board threat, current-street aggression, and pot-relative sizing. Leo applies pressure more readily; Virgo calls more selectively and value/protection bets strong made hands or credible draws. The August classes preserve the prior policies for reproducible baseline comparisons. No policy receives opponents' hole cards or bypasses `Table` action validation.
 
 ## Hand ranking
 

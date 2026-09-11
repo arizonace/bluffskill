@@ -1,4 +1,6 @@
 #include "bluffskill/poker/house.hpp"
+#include "bluffskill/poker/august_leo_reference_player.hpp"
+#include "bluffskill/poker/august_virgo_reference_player.hpp"
 #include "bluffskill/poker/leo_reference_player.hpp"
 #include "bluffskill/poker/virgo_reference_player.hpp"
 
@@ -16,6 +18,18 @@ bluffskill::poker::TableView privateTurn(std::string name, bluffskill::cards::Ca
     return view;
 }
 
+bluffskill::poker::TableView checkedFlop(std::string name, bluffskill::cards::Card first, bluffskill::cards::Card second) {
+    using namespace bluffskill::poker;
+    auto view = privateTurn(std::move(name), first, second);
+    view.street = Street::flop;
+    view.communityCards = {{bluffskill::cards::Suit::clubs, bluffskill::cards::Rank::ace},
+        {bluffskill::cards::Suit::diamonds, bluffskill::cards::Rank::king},
+        {bluffskill::cards::Suit::hearts, bluffskill::cards::Rank::two}};
+    view.pots = {{.amount = 300, .eligibleSeats = {1, 2}}};
+    view.legalActions = LegalActions{.check = true, .bet = true, .fold = true, .minimumAmount = 50, .maximumAmount = 1000};
+    return view;
+}
+
 } // namespace
 
 int main() {
@@ -25,24 +39,25 @@ int main() {
 
     const auto aces = privateTurn("Bold", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
     std::mt19937_64 stableRandom{7};
-    LeoReferencePlayer bold{"Bold", {.riskTolerance = 1.0, .optimism = 1.0, .variability = 0.0}};
+    // The archived August policy remains deterministic for its established cases.
+    AugustLeoReferencePlayer bold{"Bold", {.riskTolerance = 1.0, .optimism = 1.0, .variability = 0.0}};
     const auto boldDecision = bold.chooseResponse(aces, stableRandom);
     assert(boldDecision.action == Action::raise);
     assert(boldDecision.amount >= 200 && boldDecision.amount <= 1000);
     assert(boldDecision.amount % 25 == 0);
 
     std::mt19937_64 cautiousRandom{7};
-    LeoReferencePlayer cautious{"Bold", {.riskTolerance = 0.0, .optimism = 0.0, .variability = 0.0}};
+    AugustLeoReferencePlayer cautious{"Bold", {.riskTolerance = 0.0, .optimism = 0.0, .variability = 0.0}};
     const auto cautiousDecision = cautious.chooseResponse(aces, cautiousRandom);
     assert(cautiousDecision.action == Action::call);
 
     try {
-        LeoReferencePlayer invalid{"Invalid", {.riskTolerance = -0.01, .optimism = 0.5, .variability = 0.5}};
+        AugustLeoReferencePlayer invalid{"Invalid", {.riskTolerance = -0.01, .optimism = 0.5, .variability = 0.5}};
         assert(false && "invalid profiles must be rejected");
     } catch (const std::invalid_argument&) {
     }
 
-    VirgoReferencePlayer virgo{"Virgo", {.curiosity = 1.0, .hope = 1.0, .empathy = 0.5, .longevity = 0.5}};
+    AugustVirgoReferencePlayer virgo{"Virgo", {.curiosity = 1.0, .hope = 1.0, .empathy = 0.5, .longevity = 0.5}};
     const auto virgoView = privateTurn("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
     std::mt19937_64 virgoRandom{7};
     const auto virgoDecision = virgo.chooseResponse(virgoView, virgoRandom);
@@ -51,11 +66,30 @@ int main() {
     assert(virgo.referenceType() == ReferencePlayerType::virgo);
     assert(virgo.parameters().size() == 4);
 
+    auto legacyStrongFlop = checkedFlop("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
+    const auto legacyStrongDecision = virgo.chooseResponse(legacyStrongFlop, virgoRandom);
+    assert(legacyStrongDecision.action == Action::check);
+
     try {
-        VirgoReferencePlayer invalid{"Invalid", {.curiosity = 0.5, .hope = 0.5, .empathy = 1.1, .longevity = 0.5}};
+        AugustVirgoReferencePlayer invalid{"Invalid", {.curiosity = 0.5, .hope = 0.5, .empathy = 1.1, .longevity = 0.5}};
         assert(false && "invalid Virgo profiles must be rejected");
     } catch (const std::invalid_argument&) {
     }
+
+    // The new defaults retain their archetypes while taking initiative with
+    // premium holdings instead of relying on the legacy fixed-stack behavior.
+    LeoReferencePlayer improvedLeo{"Bold", {.riskTolerance = 0.5, .optimism = 0.5, .variability = 0.0}};
+    std::mt19937_64 improvedLeoRandom{7};
+    const auto improvedLeoDecision = improvedLeo.chooseResponse(aces, improvedLeoRandom);
+    assert(improvedLeoDecision.action == Action::raise);
+    assert(improvedLeoDecision.amount >= 200 && improvedLeoDecision.amount <= 1000);
+
+    VirgoReferencePlayer improvedVirgo{"Virgo", {.curiosity = 0.5, .hope = 0.7, .empathy = 0.5, .longevity = 0.5}};
+    auto strongFlop = checkedFlop("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
+    std::mt19937_64 improvedVirgoRandom{7};
+    const auto improvedVirgoDecision = improvedVirgo.chooseResponse(strongFlop, improvedVirgoRandom);
+    assert(improvedVirgoDecision.action == Action::bet);
+    assert(improvedVirgoDecision.amount >= 50 && improvedVirgoDecision.amount <= 1000);
 
     House house;
     const auto competition = house.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7000});

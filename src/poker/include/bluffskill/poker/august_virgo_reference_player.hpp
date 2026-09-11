@@ -4,26 +4,26 @@
 
 namespace bluffskill::poker {
 
-// Each value is normalized to [0, 1]. Virgo is selective and pot-controlling,
-// while still value betting strong hands and drawing hands at sensible prices.
-struct VirgoReferencePlayerProfile {
+// The September 2026 Virgo policy retained as a stable reference opponent.
+// Values are normalized to [0, 1].
+struct AugustVirgoReferencePlayerProfile {
     double curiosity;
     double hope;
     double empathy;
     double longevity;
 };
 
-class VirgoReferencePlayer final : public ReferencePlayerController {
+class AugustVirgoReferencePlayer final : public ReferencePlayerController {
 public:
-    VirgoReferencePlayer(std::string name, VirgoReferencePlayerProfile profile);
+    AugustVirgoReferencePlayer(std::string name, AugustVirgoReferencePlayerProfile profile);
 
     [[nodiscard]] ReferencePlayerType referenceType() const noexcept override { return ReferencePlayerType::virgo; }
-    [[nodiscard]] const VirgoReferencePlayerProfile& profile() const noexcept { return profile_; }
+    [[nodiscard]] const AugustVirgoReferencePlayerProfile& profile() const noexcept { return profile_; }
     [[nodiscard]] std::vector<ReferencePlayerParameter> parameters() const override;
     [[nodiscard]] ReferenceDecision chooseResponse(const TableView& privateView, std::mt19937_64& random) const override;
 
 private:
-    VirgoReferencePlayerProfile profile_;
+    AugustVirgoReferencePlayerProfile profile_;
 };
 
 } // namespace bluffskill::poker

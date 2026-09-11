@@ -4,25 +4,25 @@
 
 namespace bluffskill::poker {
 
-// Each value is normalized to [0, 1]. Leo is assertive, but bases pressure on
-// actual made hands, draws, price, and stack depth instead of a fixed-stack bet.
-struct LeoReferencePlayerProfile {
+// The September 2026 Leo policy retained as a stable reference opponent.
+// Values are normalized to [0, 1].
+struct AugustLeoReferencePlayerProfile {
     double riskTolerance;
     double optimism;
     double variability;
 };
 
-class LeoReferencePlayer final : public ReferencePlayerController {
+class AugustLeoReferencePlayer final : public ReferencePlayerController {
 public:
-    LeoReferencePlayer(std::string name, LeoReferencePlayerProfile profile);
+    AugustLeoReferencePlayer(std::string name, AugustLeoReferencePlayerProfile profile);
 
     [[nodiscard]] ReferencePlayerType referenceType() const noexcept override { return ReferencePlayerType::leo; }
-    [[nodiscard]] const LeoReferencePlayerProfile& profile() const noexcept { return profile_; }
+    [[nodiscard]] const AugustLeoReferencePlayerProfile& profile() const noexcept { return profile_; }
     [[nodiscard]] std::vector<ReferencePlayerParameter> parameters() const override;
     [[nodiscard]] ReferenceDecision chooseResponse(const TableView& privateView, std::mt19937_64& random) const override;
 
 private:
-    LeoReferencePlayerProfile profile_;
+    AugustLeoReferencePlayerProfile profile_;
 };
 
 } // namespace bluffskill::poker

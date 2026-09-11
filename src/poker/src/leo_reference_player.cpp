@@ -1,5 +1,7 @@
 #include "bluffskill/poker/leo_reference_player.hpp"
 
+#include "reference_player_hand_analysis.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -8,57 +10,14 @@ namespace bluffskill::poker {
 
 namespace {
 
-double rankValue(cards::Rank rank) {
-    return (static_cast<double>(rank) - static_cast<double>(cards::Rank::two)) / 12.0;
-}
-
-double preflopStrength(const std::vector<cards::Card>& holeCards) {
-    if (holeCards.size() != 2) return 0.0;
-    const auto first = rankValue(holeCards[0].rank);
-    const auto second = rankValue(holeCards[1].rank);
-    const auto high = std::max(first, second);
-    const auto low = std::min(first, second);
-    if (holeCards[0].rank == holeCards[1].rank) return 0.62 + high * 0.38;
-
-    auto strength = 0.07 + high * 0.48 + low * 0.12;
-    if (holeCards[0].suit == holeCards[1].suit) strength += 0.08;
-    const auto gap = std::abs(static_cast<int>(holeCards[0].rank) - static_cast<int>(holeCards[1].rank));
-    if (gap == 1) strength += 0.10;
-    else if (gap == 2) strength += 0.05;
-    return std::clamp(strength, 0.0, 1.0);
-}
-
-double handConfidence(const TableView& view, const TablePlayerView& player) {
-    auto confidence = preflopStrength(player.holeCards);
-    if (view.communityCards.empty()) return confidence;
-
-    int matchingBoardCards = 0;
-    for (const auto hole : player.holeCards) {
-        for (const auto board : view.communityCards) {
-            if (hole.rank == board.rank) ++matchingBoardCards;
-        }
+double streetPressureBonus(Street street) {
+    switch (street) {
+    case Street::preflop: return 0.06;
+    case Street::flop: return 0.09;
+    case Street::turn: return 0.04;
+    case Street::river: return -0.03;
+    default: return 0.0;
     }
-    if (matchingBoardCards > 0) confidence += 0.22 + 0.10 * matchingBoardCards;
-
-    int suitedCards = 0;
-    for (const auto hole : player.holeCards) {
-        for (const auto board : view.communityCards) {
-            if (hole.suit == board.suit) ++suitedCards;
-        }
-    }
-    if (suitedCards >= 3) confidence += 0.08;
-    return std::clamp(confidence, 0.0, 1.0);
-}
-
-Chips sizedCommitment(const LegalActions& legal, const ChipDenominations& denominations, double confidence, double riskTolerance, double variation) {
-    if (legal.maximumAmount <= legal.minimumAmount) return legal.minimumAmount;
-    const auto fraction = std::clamp(0.18 + confidence * 0.48 + riskTolerance * 0.26 + variation * 0.08, 0.0, 1.0);
-    const auto span = static_cast<double>(legal.maximumAmount - legal.minimumAmount);
-    const auto candidate = legal.minimumAmount + static_cast<Chips>(std::llround(span * fraction));
-    const auto unit = denominations.front();
-    const auto roundedUp = ((candidate + unit - 1) / unit) * unit;
-    const auto maximumChipValue = (legal.maximumAmount / unit) * unit;
-    return std::clamp(std::min(roundedUp, maximumChipValue), legal.minimumAmount, maximumChipValue);
 }
 
 } // namespace
@@ -76,36 +35,49 @@ std::vector<ReferencePlayerParameter> LeoReferencePlayer::parameters() const {
 }
 
 ReferenceDecision LeoReferencePlayer::chooseResponse(const TableView& privateView, std::mt19937_64& random) const {
-    const auto player = std::ranges::find_if(privateView.players, [this](const TablePlayerView& candidate) {
-        return candidate.name == name();
-    });
-    if (player == privateView.players.end() || !player->acting || !privateView.legalActions) {
-        throw std::invalid_argument("Leo reference player was asked to act without a private legal table view");
-    }
-
+    if (!privateView.legalActions) throw std::invalid_argument("Leo reference player was asked to act without legal actions");
+    const auto& player = detail::actingPlayer(privateView, name());
     const auto& legal = *privateView.legalActions;
     const auto denominations = privateView.chipDenominations.empty() ? defaultChipDenominations() : privateView.chipDenominations;
-    std::uniform_real_distribution<double> noise(-1.0, 1.0);
-    const auto variation = noise(random) * profile_.variability;
-    const auto confidence = std::clamp(handConfidence(privateView, *player) + profile_.optimism * 0.18 + variation * 0.16, 0.0, 1.0);
-    const auto pressure = legal.callAmount == 0 ? 0.0
-        : static_cast<double>(legal.callAmount) / static_cast<double>(std::max<Chips>(1, player->stack + legal.callAmount));
+    const auto analysis = detail::analyzeHand(privateView, player);
+    const auto aggression = detail::observedAggression(privateView, player);
+    const auto price = detail::potOdds(privateView, legal);
+    std::uniform_real_distribution<double> distribution(-1.0, 1.0);
+    const auto variation = distribution(random) * profile_.variability;
+
+    const auto handValue = std::clamp(analysis.made + analysis.draw * 0.36 + profile_.optimism * 0.07 + variation * 0.05, 0.0, 1.0);
+    const auto pressure = std::clamp(analysis.boardThreat + aggression * 0.45, 0.0, 1.0);
+    const auto aggressiveThreshold = 0.67 - profile_.riskTolerance * 0.12 - profile_.optimism * 0.05;
+    const auto pot = detail::potSize(privateView);
+    const auto sizing = [&](double fraction, double stackCap) {
+        return detail::sizedCommitment(legal, denominations, player.roundCommitted, pot, fraction, stackCap, player.stack);
+    };
 
     if (legal.check) {
-        const auto betScore = confidence + profile_.riskTolerance * 0.42 + variation * 0.12;
-        if (legal.bet && betScore >= 0.94) {
-            return {.action = Action::bet, .amount = sizedCommitment(legal, denominations, confidence, profile_.riskTolerance, variation)};
+        const auto continuationBet = handValue + profile_.riskTolerance * 0.10 + streetPressureBonus(privateView.street)
+            - pressure * 0.12;
+        const auto valueBet = analysis.made >= 0.57;
+        const auto semiBluff = analysis.draw >= 0.40 && continuationBet >= aggressiveThreshold - 0.09;
+        if (legal.bet && (valueBet || semiBluff || continuationBet >= aggressiveThreshold)) {
+            const auto fraction = analysis.made >= 0.80 ? 0.76 : analysis.draw >= 0.40 ? 0.58 : 0.48;
+            const auto stackCap = analysis.made >= 0.88 ? 0.85 : 0.62;
+            return {.action = Action::bet, .amount = sizing(fraction, stackCap)};
         }
         return {.action = Action::check};
     }
 
-    const auto raiseScore = confidence + profile_.riskTolerance * 0.40 + profile_.optimism * 0.12 - pressure * 0.35 + variation * 0.12;
-    if (legal.raise && raiseScore >= 1.08) {
-        return {.action = Action::raise, .amount = sizedCommitment(legal, denominations, confidence, profile_.riskTolerance, variation)};
+    const auto raiseScore = handValue + profile_.riskTolerance * 0.13 - price * 0.20 - pressure * 0.08;
+    const auto strongValue = analysis.made >= 0.77;
+    const auto strongDraw = analysis.draw >= 0.44 && raiseScore >= aggressiveThreshold + 0.02;
+    if (legal.raise && (strongValue || strongDraw) && raiseScore >= aggressiveThreshold) {
+        const auto fraction = strongValue ? 0.72 : 0.55;
+        const auto stackCap = analysis.made >= 0.90 ? 0.88 : 0.60;
+        return {.action = Action::raise, .amount = sizing(fraction, stackCap)};
     }
 
-    const auto callScore = confidence + profile_.riskTolerance * 0.34 + profile_.optimism * 0.12 + variation * 0.12;
-    if (legal.call && callScore >= 0.47 + pressure * 0.92) return {.action = Action::call};
+    const auto callScore = analysis.made + analysis.draw * 0.49 + profile_.riskTolerance * 0.08 + profile_.optimism * 0.05
+        - pressure * 0.16 + variation * 0.04;
+    if (legal.call && callScore >= price + 0.05) return {.action = Action::call};
     if (legal.fold) return {.action = Action::fold};
     throw std::logic_error("Leo reference player has no legal response");
 }
