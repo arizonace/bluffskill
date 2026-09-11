@@ -303,7 +303,7 @@ private:
         return description.isEmpty() ? cards : description + " - " + cards;
     }
 
-    [[nodiscard]] QString foldedHoleCardsForLog(std::string_view competitionName, std::string_view tableName,
+    [[nodiscard]] QString holeCardsForLog(std::string_view competitionName, std::string_view tableName,
         std::string_view playerName) const {
         const auto playerView = house_.tableView(competitionName, tableName, playerName);
         const auto player = std::ranges::find_if(playerView.players, [playerName](const auto& candidate) {
@@ -631,7 +631,7 @@ private:
                     const auto gain = folded
                         ? lostValue(committedThroughAction(view, action.seat, static_cast<std::size_t>(index))) : QString{};
                     const auto holeCards = folded
-                        ? foldedHoleCardsForLog(competition.name, table.name, action.player) : QString{};
+                        ? holeCardsForLog(competition.name, table.name, action.player) : QString{};
                     appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
                         round, QString::fromUtf8(bluffskill::poker::toString(action.action)), value, QLocale().toString(action.stackAfter), gain,
                         QLocale().toString(action.potAfter), actionAnnotations(view, static_cast<std::size_t>(index)), holeCards);
@@ -666,7 +666,8 @@ private:
                             if (winnings <= 0) continue;
                             const auto netGain = winnings - static_cast<qint64>(player.committed);
                             appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), foldedRound, round, "Pot Folded", QLocale().toString(potValue),
-                                QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue));
+                                QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue), {},
+                                holeCardsForLog(competition.name, table.name, player.name));
                             cursor.loggedFoldedPot = true;
                             break;
                         }
