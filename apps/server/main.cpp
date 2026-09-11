@@ -652,7 +652,7 @@ private:
                             if (winnings > 0 && !cursor.loggedPotWinnerSeats.contains(seat)) {
                                 const auto netGain = winnings - static_cast<qint64>(player.committed);
                                 appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", round, "Pot Won", QLocale().toString(potValue),
-                                    QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue), showdownHand(player));
+                                    QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue), showdownHand(player), pokerNotation(player.holeCards));
                                 cursor.loggedPotWinnerSeats.insert(seat);
                                 cursor.loggedShowdownHandSeats.insert(seat);
                             }
@@ -676,7 +676,7 @@ private:
                         if (player.stack == 0 && cursor.handStartingStacks.value(seat) > 0 && !cursor.loggedBustedSeats.contains(seat)) {
                             const auto lost = committedThroughAction(view, player.seat, view.actionHistory.size()) - winningsBySeat.value(seat);
                             appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", round, "Busted Out", {}, QLocale().toString(player.stack),
-                                lostValue(lost), QLocale().toString(potValue), showdownHand(player));
+                                lostValue(lost), QLocale().toString(potValue), showdownHand(player), pokerNotation(player.holeCards));
                             cursor.loggedBustedSeats.insert(seat);
                             if (view.showdownOccurred) cursor.loggedShowdownHandSeats.insert(seat);
                         }
@@ -687,7 +687,7 @@ private:
                             if (player.folded || cursor.loggedShowdownHandSeats.contains(seat)) continue;
                             const auto lost = committedThroughAction(view, player.seat, view.actionHistory.size()) - winningsBySeat.value(seat);
                             appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", round, "Hand", {}, QLocale().toString(player.stack),
-                                lostValue(lost), QLocale().toString(potValue), showdownHand(player));
+                                lostValue(lost), QLocale().toString(potValue), showdownHand(player), pokerNotation(player.holeCards));
                             cursor.loggedShowdownHandSeats.insert(seat);
                         }
                     }
