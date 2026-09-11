@@ -255,8 +255,11 @@ private:
         qint64 lastBigBlind{0};
     };
 
+    static constexpr int actionLogHoleCardsRole = Qt::UserRole + 1;
+
     void appendActionLogRow(const QString& player, const QString& kind, const QString& street, const QString& round, const QString& action,
-        const QString& value = {}, const QString& stack = {}, const QString& gain = {}, const QString& pot = {}, const QString& hand = {}) {
+        const QString& value = {}, const QString& stack = {}, const QString& gain = {}, const QString& pot = {}, const QString& hand = {},
+        const QString& hiddenHoleCards = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
         actionLog_->setItem(row, 0, new QTableWidgetItem(player));
@@ -270,6 +273,7 @@ private:
         actionLog_->setItem(row, 8, new QTableWidgetItem(pot));
         actionLog_->setItem(row, 9, new QTableWidgetItem(hand));
         actionLog_->item(row, 0)->setData(Qt::UserRole, activeActionLogTableKey_);
+        actionLog_->item(row, 0)->setData(actionLogHoleCardsRole, hiddenHoleCards);
         actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
     }
 
@@ -300,6 +304,15 @@ private:
         return description.isEmpty() ? cards : description + " - " + cards;
     }
 
+    [[nodiscard]] QString foldedHoleCardsForLog(std::string_view competitionName, std::string_view tableName,
+        std::string_view playerName) const {
+        const auto playerView = house_.tableView(competitionName, tableName, playerName);
+        const auto player = std::ranges::find_if(playerView.players, [playerName](const auto& candidate) {
+            return candidate.name == playerName;
+        });
+        return player == playerView.players.end() ? QString{} : pokerNotation(player->holeCards);
+    }
+
     [[nodiscard]] static QString communityCards(const bluffskill::poker::TableView& view, std::size_t first, std::size_t count) {
         std::vector<bluffskill::cards::Card> cards;
         const auto last = std::min(first + count, view.communityCards.size());
@@ -310,15 +323,15 @@ private:
 
     void appendCommunityCardLogRows(const bluffskill::poker::TableView& view, ActionLogCursor& cursor, std::size_t visibleCards) {
         if (cursor.loggedCommunityCards == 0 && visibleCards >= 3 && view.communityCards.size() >= 3) {
-            appendActionLogRow("Dealer", {}, "Flop", QString::number(view.roundsPlayed), "Deal", {}, {}, {}, {}, communityCards(view, 0, 3));
+            appendActionLogRow("Dealer", {}, "Flop", QString::number(view.roundsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 0, 3));
             cursor.loggedCommunityCards = 3;
         }
         if (cursor.loggedCommunityCards == 3 && visibleCards >= 4 && view.communityCards.size() >= 4) {
-            appendActionLogRow("Dealer", {}, "Turn", QString::number(view.roundsPlayed), "Deal", {}, {}, {}, {}, communityCards(view, 3, 1));
+            appendActionLogRow("Dealer", {}, "Turn", QString::number(view.roundsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 3, 1));
             cursor.loggedCommunityCards = 4;
         }
         if (cursor.loggedCommunityCards == 4 && visibleCards >= 5 && view.communityCards.size() >= 5) {
-            appendActionLogRow("Dealer", {}, "River", QString::number(view.roundsPlayed), "Deal", {}, {}, {}, {}, communityCards(view, 4, 1));
+            appendActionLogRow("Dealer", {}, "River", QString::number(view.roundsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 4, 1));
             cursor.loggedCommunityCards = 5;
         }
     }
@@ -376,7 +389,8 @@ private:
                 {"stack", actionLog_->item(row, 6)->text()},
                 {"gain", actionLog_->item(row, 7)->text()},
                 {"pot", actionLog_->item(row, 8)->text()},
-                {"hand", actionLog_->item(row, 9)->text()}});
+                {"hand", actionLog_->item(row, 9)->text()},
+                {"holeCards", player->data(actionLogHoleCardsRole).toString()}});
         }
         return actions;
     }
@@ -423,7 +437,7 @@ private:
     }
 
     bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
-        QString csv = "Index,Player,Kind,Street,Round,Action,Value,Stack,Gain,Pot,Hand\n";
+        QString csv = "Index,Player,Kind,Street,Round,Action,Value,Stack,Gain,Pot,Hand,Hole Cards\n";
         int serializedIndex = 1;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
             const auto* player = actionLog_->item(row, 0);
@@ -434,6 +448,7 @@ private:
                 const auto* item = actionLog_->item(row, column);
                 csv += csvCell(item == nullptr ? QString{} : item->text());
             }
+            csv += ',' + csvCell(player->data(actionLogHoleCardsRole).toString());
             csv += '\n';
         }
         return writeFile(withSuffix(path, "csv"), csv.toUtf8(), "Action Log CSV");
@@ -617,9 +632,11 @@ private:
                     const auto value = folded || action.amount == 0 ? QString{} : QLocale().toString(action.amount);
                     const auto gain = folded
                         ? lostValue(committedThroughAction(view, action.seat, static_cast<std::size_t>(index))) : QString{};
+                    const auto holeCards = folded
+                        ? foldedHoleCardsForLog(competition.name, table.name, action.player) : QString{};
                     appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
                         round, QString::fromUtf8(bluffskill::poker::toString(action.action)), value, QLocale().toString(action.stackAfter), gain,
-                        QLocale().toString(action.potAfter), actionAnnotations(view, static_cast<std::size_t>(index)));
+                        QLocale().toString(action.potAfter), actionAnnotations(view, static_cast<std::size_t>(index)), holeCards);
                 }
                 appendCommunityCardLogRows(view, cursor, view.communityCards.size());
                 if (view.street == bluffskill::poker::Street::showdown) {

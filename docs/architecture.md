@@ -42,7 +42,7 @@ For the first playable slice, serialize only at clean hand boundaries. Mid-hand 
 
 ## Public and private views
 
-The engine produces a `TableView` for each viewer rather than exposing domain objects. A public view has community cards, shown cards, stack totals, action history, pot/side-pot eligibility, dealer button, and acting seat. A player view additionally has that player’s hole cards. Internal deck order, folded hole cards, opponents’ hole cards, bot parameters, and secrets never cross this boundary.
+The engine produces a `TableView` for each viewer rather than exposing domain objects. A public view has community cards, shown cards, stack totals, action history, pot/side-pot eligibility, dealer button, and acting seat. A player view additionally has that player’s hole cards. Internal deck order, folded hole cards, opponents’ hole cards, bot parameters, and secrets never cross this boundary. The trusted server console may request the folding player's own projection solely to place those cards in its non-displayed local action-log export field; it must not add them to a public view, REST response, or client UI.
 
 ## API evolution
 
