@@ -156,8 +156,8 @@ public:
         log_ = new QPlainTextEdit(splitter);
         log_->setReadOnly(true);
         actionLog_ = new QTableWidget(splitter);
-        actionLog_->setColumnCount(10);
-        actionLog_->setHorizontalHeaderLabels({"Player", "Kind", "Street", "Round", "Action", "Value", "Stack", "Gain", "Pot", "Hand"});
+        actionLog_->setColumnCount(11);
+        actionLog_->setHorizontalHeaderLabels({"Player", "Kind", "Street", "Round", "Action", "Value", "Stack", "Gain", "Pot", "Hand", "Hole"});
         actionLog_->setMinimumWidth(1180);
         actionLog_->setColumnWidth(0, 150);
         actionLog_->setColumnWidth(1, 90);
@@ -168,6 +168,7 @@ public:
         actionLog_->setColumnWidth(6, 100);
         actionLog_->setColumnWidth(7, 100);
         actionLog_->setColumnWidth(8, 100);
+        actionLog_->setColumnHidden(10, true);
         actionLog_->horizontalHeader()->setStretchLastSection(true);
         actionLog_->verticalHeader()->setVisible(false);
         actionLog_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -256,7 +257,8 @@ private:
     };
 
     void appendActionLogRow(const QString& player, const QString& kind, const QString& street, const QString& round, const QString& action,
-        const QString& value = {}, const QString& stack = {}, const QString& gain = {}, const QString& pot = {}, const QString& hand = {}) {
+        const QString& value = {}, const QString& stack = {}, const QString& gain = {}, const QString& pot = {}, const QString& hand = {},
+        const QString& hole = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
         actionLog_->setItem(row, 0, new QTableWidgetItem(player));
@@ -269,6 +271,7 @@ private:
         actionLog_->setItem(row, 7, new QTableWidgetItem(gain));
         actionLog_->setItem(row, 8, new QTableWidgetItem(pot));
         actionLog_->setItem(row, 9, new QTableWidgetItem(hand));
+        actionLog_->setItem(row, 10, new QTableWidgetItem(hole));
         actionLog_->item(row, 0)->setData(Qt::UserRole, activeActionLogTableKey_);
         actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
     }
@@ -385,7 +388,8 @@ private:
                 {"stack", actionLog_->item(row, 6)->text()},
                 {"gain", actionLog_->item(row, 7)->text()},
                 {"pot", actionLog_->item(row, 8)->text()},
-                {"hand", actionLog_->item(row, 9)->text()}});
+                {"hand", actionLog_->item(row, 9)->text()},
+                {"holeCards", actionLog_->item(row, 10)->text()}});
         }
         return actions;
     }
@@ -432,7 +436,7 @@ private:
     }
 
     bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
-        QString csv = "Index,Player,Kind,Street,Round,Action,Value,Stack,Gain,Pot,Hand\n";
+        QString csv = "Index,Player,Kind,Street,Round,Action,Value,Stack,Gain,Pot,Hand,Hole\n";
         int serializedIndex = 1;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
             const auto* player = actionLog_->item(row, 0);
@@ -630,7 +634,7 @@ private:
                         ? foldedHoleCardsForLog(competition.name, table.name, action.player) : QString{};
                     appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
                         round, QString::fromUtf8(bluffskill::poker::toString(action.action)), value, QLocale().toString(action.stackAfter), gain,
-                        QLocale().toString(action.potAfter), folded ? holeCards : actionAnnotations(view, static_cast<std::size_t>(index)));
+                        QLocale().toString(action.potAfter), actionAnnotations(view, static_cast<std::size_t>(index)), holeCards);
                 }
                 appendCommunityCardLogRows(view, cursor, view.communityCards.size());
                 if (view.street == bluffskill::poker::Street::showdown) {

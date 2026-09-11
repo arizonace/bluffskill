@@ -74,7 +74,7 @@ TLS protects transport confidentiality and integrity, but does not make a replay
 2. Issue a short-lived, audience-bound access token and a rotating refresh token in secure, HttpOnly cookies or OS secure storage.
 3. Bind each command to its authenticated player identity, table, `expectedSequence`, request ID, UTC expiry, and body digest.
 4. For higher assurance program clients, require OAuth 2.1 DPoP or mTLS, using established libraries and audited key storage. Verify the proof’s method/URL, token binding, nonce, expiry, and replay identifier.
-5. Rate-limit identity and IP; log accepted/rejected command metadata without logging tokens, hole cards, deck order, or secret material. A user-requested server-console action-log export is separate from operational security logging: it retains a folding player's cards for hand review in the fold row's `hand` value, must remain local/private, and must never be served through an API or client UI.
+5. Rate-limit identity and IP; log accepted/rejected command metadata without logging tokens, hole cards, deck order, or secret material. A user-requested server-console action-log export is separate from operational security logging: it retains a folding player's cards for hand review in a hidden `holeCards` value, must remain local/private, and must never be served through an API or client UI.
 
 Sign server notifications with the TLS session in the normal case. If messages pass through an intermediary, use an established JWS/COSE implementation with rotating server keys and publish the verification key set. Never invent a custom MAC block, expose a symmetric client secret to a browser/client, or rely on a timestamp alone for replay protection.
 
