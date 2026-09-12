@@ -52,4 +52,4 @@ Reject punctuation that conflicts with qualified forms. The built-in house data 
 - A table transition is atomic: validate, alter commitments, recompute pots, resolve the next actor, append the event, then publish its views.
 - Side-pot eligibility is based on contributions and fold status, not on current stack.
 - Only a view projection may leave the engine.
-- A house may be cleared only when every started table has a winner; clearing removes all competitions, tables, and players.
+- A house may be cleared only when every started table has a winner or was deliberately quit; clearing removes all competitions, tables, and players. Quitting selects the chip leader (including chips committed in an active hand), resolving an equal total by the lower one-based seat, and ends that table without settling its active hand.

@@ -17,6 +17,7 @@ struct Settings {
     QString defaultPlayerName{"Player"};
     QList<quint16> serverPreferredPorts{53153, 53154, 53155};
     bool clientAutoConnect{false};
+    bool soundEffects{true};
 };
 
 class AppConfig final {

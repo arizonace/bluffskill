@@ -81,6 +81,7 @@ Settings AppConfig::load() {
     }
     settings.defaultPlayerName = store.value("client/defaultPlayerName", settings.defaultPlayerName).toString();
     settings.clientAutoConnect = store.value("client/autoConnect", false).toBool();
+    settings.soundEffects = store.value("preferences/soundEffects", true).toBool();
     settings.serverPreferredPorts.clear();
     for (const auto& value : store.value("server/preferredPorts").toStringList()) {
         bool valid = false;
@@ -109,6 +110,7 @@ void AppConfig::save(const Settings& input) {
     store.setValue("chips/denominations", denominations);
     store.setValue("client/defaultPlayerName", settings.defaultPlayerName);
     store.setValue("client/autoConnect", settings.clientAutoConnect);
+    store.setValue("preferences/soundEffects", settings.soundEffects);
     QStringList ports;
     for (const auto port : settings.serverPreferredPorts) ports.append(QString::number(port));
     store.setValue("server/preferredPorts", ports);

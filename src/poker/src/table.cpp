@@ -309,6 +309,7 @@ void Table::advanceBlindLevelIfDue() {
 }
 
 void Table::startHand() {
+    if (gameQuit_) throw std::logic_error("the game has ended");
     if (street_ != Street::waiting) throw std::logic_error("a hand is already running");
     if (seats_.size() < 2) throw std::logic_error("at least two seated players are required");
     advanceBlindLevelIfDue();
@@ -371,6 +372,7 @@ void Table::startHand() {
 }
 
 void Table::startNextHand() {
+    if (gameQuit_) throw std::logic_error("the game has ended");
     if (street_ != Street::showdown) throw std::logic_error("the current hand has not finished");
     if (!dealerSeat_) throw std::logic_error("the finished hand has no dealer");
     const auto* nextDealer = nextEligibleSeatAfter(*dealerSeat_);
@@ -381,6 +383,7 @@ void Table::startNextHand() {
 }
 
 void Table::restartGame() {
+    gameQuit_ = false;
     for (auto& seat : seats_) {
         seat.stack = startingStack_;
         seat.handCommitted = 0;
@@ -409,6 +412,35 @@ void Table::restartGame() {
     blindLevelStartedAt_ = std::chrono::steady_clock::now();
     deck_.reset();
     startHand();
+}
+
+TableWinner Table::quitGame() {
+    if (gameQuit_) throw std::logic_error("the game has already ended");
+    if (roundsPlayed_ == 0) throw std::logic_error("the game has not started");
+    if (seats_.empty()) throw std::logic_error("the table has no players");
+
+    const auto chipsFor = [this](const Seat& seat) {
+        return seat.stack + (street_ == Street::showdown ? 0 : seat.handCommitted);
+    };
+    const auto winner = std::ranges::max_element(seats_, [&chipsFor](const Seat& left, const Seat& right) {
+        const auto leftChips = chipsFor(left);
+        const auto rightChips = chipsFor(right);
+        if (leftChips != rightChips) return leftChips < rightChips;
+        return left.number > right.number;
+    });
+    gameQuit_ = true;
+    street_ = Street::showdown;
+    actingSeat_.reset();
+    payouts_.clear();
+    showdownOccurred_ = false;
+    for (auto& seat : seats_) seat.pending = false;
+    ++eventSequence_;
+    return {.player = winner->name, .seat = winner->number, .chips = chipsFor(*winner)};
+}
+
+bool Table::isGameInProgress() const {
+    if (roundsPlayed_ == 0 || gameQuit_) return false;
+    return std::count_if(seats_.begin(), seats_.end(), [](const Seat& seat) { return seat.stack > 0; }) > 1;
 }
 
 Table::Seat& Table::seatFor(std::string_view name) {

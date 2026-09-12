@@ -91,6 +91,13 @@ int main() {
         assert(false && "an active house must not be cleared");
     } catch (const std::logic_error&) {
     }
+    const auto quitWinner = clearableHouse.quitGame(clearableCompetition.name, "Red");
+    assert(quitWinner.player == "One");
+    assert(quitWinner.seat == 1);
+    assert(quitWinner.chips == 7'000);
+    assert(!clearableHouse.hasGamesInProgress());
+    clearableHouse.clear();
+    assert(clearableHouse.competitions().empty());
 
     bluffskill::poker::House emptyHouse;
     [[maybe_unused]] const auto emptyCompetition = emptyHouse.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7'000});

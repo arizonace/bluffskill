@@ -26,7 +26,6 @@
 #include <QCheckBox>
 #include <QLineEdit>
 #include <QLocale>
-#include <QPlainTextEdit>
 #include <QSet>
 #include <QSettings>
 #include <QSplitter>
@@ -35,6 +34,7 @@
 #include <QStandardPaths>
 #include <QTcpServer>
 #include <QTableWidget>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QUrlQuery>
 #include <QVBoxLayout>
@@ -148,13 +148,16 @@ class ServerWindow final : public QMainWindow {
 public:
     explicit ServerWindow(bluffskill::app_config::Settings settings)
         : house_(pokerBlindSchedule(settings), pokerChipDenominations(settings)), settings_(std::move(settings)) {
+        initializeServerLog();
+        connect(&serverLogRotationTimer_, &QTimer::timeout, this, [this] {
+            rotateServerLogIfNeeded();
+            scheduleServerLogRotation();
+        });
         setWindowTitle("BluffSkill Server");
         resize(1800, 680);
         auto* splitter = new QSplitter(this);
         tree_ = new QTreeWidget(splitter);
         tree_->setHeaderLabels({"House / competition / table / player"});
-        log_ = new QPlainTextEdit(splitter);
-        log_->setReadOnly(true);
         actionLog_ = new QTableWidget(splitter);
         actionLog_->setColumnCount(11);
         actionLog_->setHorizontalHeaderLabels({"Player", "Kind", "Street", "Round", "Action", "Value", "Stack", "Gain", "Pot", "Hand", "Hole"});
@@ -175,12 +178,13 @@ public:
         actionLog_->setSelectionMode(QAbstractItemView::NoSelection);
         actionLog_->setAlternatingRowColors(true);
         tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-        splitter->setSizes({260, 300, 1200});
+        splitter->setSizes({360, 1440});
         setCentralWidget(splitter);
         auto* fileMenu = menuBar()->addMenu("File");
         auto* saveActionLogAction = fileMenu->addAction("Save Action Log…");
-        clearHouseAction_ = fileMenu->addAction("Clear House");
-        auto* clearLogAction = fileMenu->addAction("Clear Log");
+        auto* serverMenu = menuBar()->addMenu("Server");
+        clearHouseAction_ = serverMenu->addAction("Clear House");
+        auto* clearLogAction = serverMenu->addAction("Clear Log");
         auto* appMenu = menuBar()->addMenu("Application");
         auto* settingsAction = appMenu->addAction("Settings…");
         auto* aboutAction = appMenu->addAction("About BluffSkill Server");
@@ -194,7 +198,10 @@ public:
     }
 
     void log(const QString& message) {
-        log_->appendPlainText(QDateTime::currentDateTime().toString("HH:mm:ss  ") + message);
+        rotateServerLogIfNeeded();
+        QFile file(serverLogPath());
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) return;
+        file.write((QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss  ") + message + '\n').toUtf8());
     }
 
     void refreshTree() {
@@ -230,7 +237,90 @@ public:
 
     bluffskill::poker::House& house() noexcept { return house_; }
 
+    [[nodiscard]] bluffskill::poker::TableWinner quitGame(const QString& competitionName, const QString& tableName, const QString& playerName) {
+        const auto competition = house_.competition(competitionName.toStdString());
+        if (!competition) throw std::invalid_argument("competition was not found");
+        const auto table = std::ranges::find_if(competition->tables, [&tableName](const auto& candidate) {
+            return QString::fromStdString(candidate.name) == tableName;
+        });
+        if (table == competition->tables.end()) throw std::invalid_argument("table was not found");
+        if (!playerName.isEmpty()) {
+            const auto player = std::ranges::find_if(table->players, [&playerName](const auto& candidate) {
+                return QString::fromStdString(candidate.player.name) == playerName;
+            });
+            if (player == table->players.end() || player->player.kind != bluffskill::poker::PlayerKind::api) {
+                throw std::invalid_argument("player is not an API player at this table");
+            }
+        }
+
+        // Bring the ordinary hand log through the final accepted action before
+        // the quit transition changes the table sequence without adding one.
+        refreshActionLog();
+        const auto winner = house_.quitGame(competitionName.toStdString(), tableName.toStdString());
+        const auto afterQuit = house_.tableView(competitionName.toStdString(), tableName.toStdString());
+        const auto tableKey = competitionName + '/' + tableName;
+        actionLogCursors_[tableKey].sequence = afterQuit.eventSequence;
+        refreshTree();
+        activeActionLogTableKey_ = tableKey;
+        const auto round = QString::number(afterQuit.roundsPlayed);
+        const auto kindFor = [table](std::string_view name) { return actionLogPlayerKind(*table, name); };
+        appendActionLogRow(playerName.isEmpty() ? "Dealer" : playerName,
+            playerName.isEmpty() ? QString{} : kindFor(playerName.toStdString()), "Game", round, "Quit Game");
+        appendActionLogRow(QString::fromStdString(winner.player), kindFor(winner.player), "Game", round, "Table Winner",
+            QLocale().toString(winner.chips), QLocale().toString(winner.chips));
+        actionLogCursors_[activeActionLogTableKey_].loggedTableWinner = true;
+        return winner;
+    }
+
 private:
+    [[nodiscard]] static QString serverLogDirectory() {
+        return QDir::home().filePath("AzoneLayer/BluffSkill");
+    }
+
+    [[nodiscard]] static QString serverLogPath() {
+        return QDir(serverLogDirectory()).filePath("server.log");
+    }
+
+    void initializeServerLog() {
+        QDir().mkpath(serverLogDirectory());
+        const QFileInfo current(serverLogPath());
+        serverLogDate_ = current.exists() ? current.lastModified().date() : QDate::currentDate();
+        rotateServerLogIfNeeded();
+        removeExpiredServerLogs();
+        scheduleServerLogRotation();
+    }
+
+    void rotateServerLogIfNeeded() {
+        const auto today = QDate::currentDate();
+        if (!serverLogDate_.isValid()) serverLogDate_ = today;
+        if (serverLogDate_ == today) return;
+        const auto currentPath = serverLogPath();
+        if (QFile::exists(currentPath)) {
+            auto datedPath = QDir(serverLogDirectory()).filePath("server-" + serverLogDate_.toString("yyyyMMdd") + ".log");
+            for (int suffix = 1; QFile::exists(datedPath); ++suffix) {
+                datedPath = QDir(serverLogDirectory()).filePath("server-" + serverLogDate_.toString("yyyyMMdd")
+                    + '-' + QString::number(suffix) + ".log");
+            }
+            QFile::rename(currentPath, datedPath);
+        }
+        serverLogDate_ = today;
+        removeExpiredServerLogs();
+    }
+
+    void removeExpiredServerLogs() const {
+        const auto earliestKept = QDate::currentDate().addDays(-6);
+        const QDir directory(serverLogDirectory());
+        for (const auto& file : directory.entryInfoList({"server-*.log"}, QDir::Files)) {
+            if (file.lastModified().date() < earliestKept) QFile::remove(file.absoluteFilePath());
+        }
+    }
+
+    void scheduleServerLogRotation() {
+        const auto now = QDateTime::currentDateTime();
+        const auto nextMidnight = QDateTime(now.date().addDays(1), QTime(0, 0));
+        serverLogRotationTimer_.start(static_cast<int>(std::max<qint64>(1, now.msecsTo(nextMidnight) + 50)));
+    }
+
     void editSettings() {
         SettingsDialog dialog(settings_, this);
         if (dialog.exec() != QDialog::Accepted) return;
@@ -249,10 +339,10 @@ private:
     }
 
     void clearLog() {
-        log_->clear();
         actionLog_->setRowCount(0);
         actionLogCursors_.clear();
         activeActionLogTableKey_.clear();
+        log("Server action log cleared");
     }
 
     void clearHouse() {
@@ -262,6 +352,7 @@ private:
         }
         house_.clear();
         clearLog();
+        log("Server house cleared");
         refreshTree();
     }
 
@@ -735,9 +826,10 @@ private:
     bluffskill::poker::House house_;
     bluffskill::app_config::Settings settings_;
     QTreeWidget* tree_{};
-    QPlainTextEdit* log_{};
     QTableWidget* actionLog_{};
     QAction* clearHouseAction_{};
+    QTimer serverLogRotationTimer_{this};
+    QDate serverLogDate_;
     QHash<QString, ActionLogCursor> actionLogCursors_;
     QString activeActionLogTableKey_;
 };
@@ -1008,6 +1100,20 @@ int main(int argc, char* argv[]) {
                 return tableViewResponse(table);
             } catch (const std::exception& exception) {
                 window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/restart → 409");
+                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
+            }
+        });
+
+    server.route("/v1/competitions/<arg>/tables/<arg>/quit", QHttpServerRequest::Method::Post,
+        [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            try {
+                const auto playerName = QJsonDocument::fromJson(request.body()).object().value("player").toString();
+                const auto winner = window.quitGame(competitionName, tableName, playerName);
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/quit → 200");
+                return QHttpServerResponse(QJsonObject{{"winner", QString::fromStdString(winner.player)},
+                    {"seat", static_cast<int>(winner.seat)}, {"chips", static_cast<qint64>(winner.chips)}});
+            } catch (const std::exception& exception) {
+                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/quit → 409");
                 return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
             }
         });

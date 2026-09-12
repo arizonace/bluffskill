@@ -44,6 +44,7 @@
 #include <QVector>
 
 #include <memory>
+#include <optional>
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -395,7 +396,7 @@ protected:
             const auto winningsDistance = 45.0 + std::abs(actionDirection.x()) * 35.0 + std::abs(actionDirection.y()) * 20.0;
             drawActionBox(painter, point + actionDirection * actionDistance, playerLastActions_[i]);
             if (street_ == "Showdown") {
-                drawResultBox(painter, point - actionDirection * winningsDistance, playerPotWinnings_[i], playerNetWinnings_[i]);
+                drawResultBox(painter, point - actionDirection * winningsDistance, playerPotWinnings_[i], playerNetWinnings_[i], playerFolded_[i]);
             }
             if (showdownOccurred_ && (!playerFolded_[i] || playerNames_[i] == localPlayerName_) && !playerHoleCards_[i].isEmpty()) {
                 drawPlayerCards(painter, playerHoleCards_[i], playerShowdownDescriptions_[i], point, inward,
@@ -530,13 +531,13 @@ private:
         painter.restore();
     }
 
-    static void drawResultBox(QPainter& painter, QPointF center, qint64 winnings, qint64 net) {
+    static void drawResultBox(QPainter& painter, QPointF center, qint64 winnings, qint64 net, bool folded) {
         if (net == 0) return;
         const QRectF rect(center.x() - 35, center.y() - 20, 70, 40);
         painter.save();
         const auto won = net > 0;
-        painter.setPen(QPen(won ? QColor("#4C3B00") : QColor("#5B1717"), 1));
-        painter.setBrush(won ? QColor("#F5E400") : QColor("#E55A5A"));
+        painter.setPen(QPen(won ? QColor("#4C3B00") : folded ? QColor("#8A3C4A") : QColor("#5B1717"), 1));
+        painter.setBrush(won ? QColor("#F5E400") : folded ? QColor("#F2B8C1") : QColor("#E55A5A"));
         painter.drawRoundedRect(rect, 14, 14);
         painter.setPen(QColor("#171717"));
         painter.setFont(QFont("Helvetica", 10, QFont::Bold));
@@ -659,6 +660,7 @@ public:
         blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
         autoConnect_ = new QCheckBox("Automatically try preferred localhost ports", this); autoConnect_->setChecked(settings.clientAutoConnect);
+        soundEffects_ = new QCheckBox("Enable sound effects", this); soundEffects_->setChecked(settings.soundEffects);
         for (int index = 0; index < 3; ++index) {
             ports_[index] = new QSpinBox(this); ports_[index]->setRange(1, 65535); ports_[index]->setValue(settings.serverPreferredPorts.value(index));
         }
@@ -674,6 +676,7 @@ public:
         layout->addRow("Preferred Port 2", ports_[1]);
         layout->addRow("Preferred Port 3", ports_[2]);
         layout->addRow("Client AutoConnect", autoConnect_);
+        layout->addRow("Sound Effects", soundEffects_);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Save, this);
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -690,6 +693,7 @@ public:
         value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
         value.clientAutoConnect = autoConnect_->isChecked();
+        value.soundEffects = soundEffects_->isChecked();
         value.serverPreferredPorts.clear();
         for (const auto* port : ports_) value.serverPreferredPorts.append(static_cast<quint16>(port->value()));
         return value;
@@ -719,6 +723,7 @@ private:
     QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
     QCheckBox* autoConnect_{};
+    QCheckBox* soundEffects_{};
     std::array<QSpinBox*, 3> ports_{};
 };
 
@@ -783,22 +788,30 @@ struct CustomGameConfiguration {
 
 class CustomGameDialog final : public QDialog {
 public:
-    explicit CustomGameDialog(const QString& defaultPlayerName, const QVector<QString>& referencePlayerTypes, QWidget* parent = nullptr) : QDialog(parent) {
+    explicit CustomGameDialog(const QString& defaultPlayerName, const QVector<QString>& referencePlayerTypes,
+        const std::optional<CustomGameConfiguration>& previous, QWidget* parent = nullptr) : QDialog(parent) {
         setWindowTitle("Custom Game");
         auto* layout = new QVBoxLayout(this);
         layout->addWidget(new QLabel("Choose exactly 10 players for this table.", this));
         auto* form = new QFormLayout;
         includeHuman_ = new QCheckBox("Include local human player", this);
-        includeHuman_->setChecked(true);
-        playerName_ = new QLineEdit(defaultPlayerName, this);
+        includeHuman_->setChecked(previous ? previous->includeHuman : true);
+        playerName_ = new QLineEdit(previous ? previous->playerName : defaultPlayerName, this);
         total_ = new QLabel(this);
         form->addRow("Human player", includeHuman_);
         form->addRow("Player name", playerName_);
         for (const auto& type : referencePlayerTypes) {
             auto* count = new QSpinBox(this);
             count->setRange(0, defaultTableSeats);
-            if (type == "Leo") count->setValue(5);
-            if (type == "Virgo") count->setValue(4);
+            if (previous) {
+                const auto remembered = std::ranges::find_if(previous->referencePlayers, [&type](const auto& player) {
+                    return player.type == type;
+                });
+                if (remembered != previous->referencePlayers.end()) count->setValue(remembered->count);
+                else if (type == "Leo") count->setValue(5);
+                else if (type == "Virgo") count->setValue(4);
+            } else if (type == "Leo") count->setValue(5);
+            else if (type == "Virgo") count->setValue(4);
             referencePlayers_.append({.type = type, .count = count});
             form->addRow(type + " players", count);
             connect(count, qOverload<int>(&QSpinBox::valueChanged), this, [this] { updateState(); });
@@ -884,6 +897,16 @@ public:
         setPausePlayButtonMode(false);
         connect(pausePlayButton_, &QPushButton::clicked, this, [this] { togglePause(); });
         connectionRow->addSpacing(8);
+        soundEffectsButton_ = new QPushButton(connection);
+        soundEffectsButton_->setFixedWidth(38);
+        soundEffectsButton_->setCheckable(true);
+        setSoundEffectsButtonState();
+        connect(soundEffectsButton_, &QPushButton::clicked, this, [this] {
+            settings_.soundEffects = soundEffectsButton_->isChecked();
+            bluffskill::app_config::AppConfig::save(settings_);
+            setSoundEffectsButtonState();
+        });
+        connectionRow->addWidget(soundEffectsButton_);
         connectionRow->addWidget(pausePlayButton_);
         connectionLayout->addLayout(connectionRow);
         auto* dealRow = new QHBoxLayout;
@@ -1012,6 +1035,9 @@ public:
         restartGameAction_ = gameMenu->addAction("Restart Game");
         restartGameAction_->setEnabled(false);
         connect(restartGameAction_, &QAction::triggered, this, [this] { restartGame(); });
+        quitGameAction_ = gameMenu->addAction("Quit Game");
+        quitGameAction_->setEnabled(false);
+        connect(quitGameAction_, &QAction::triggered, this, [this] { quitGame(); });
         auto* applicationMenu = menuBar()->addMenu("Application");
         auto* settingsAction = applicationMenu->addAction("Settings…");
         auto* aboutAction = applicationMenu->addAction("About BluffSkill");
@@ -1065,6 +1091,7 @@ private:
         if (dialog.exec() != QDialog::Accepted) return;
         settings_ = dialog.settings(settings_);
         bluffskill::app_config::AppConfig::save(settings_);
+        setSoundEffectsButtonState();
         statusBar()->showMessage("Settings saved. New clock values apply to the next countdown.");
     }
 
@@ -1095,6 +1122,7 @@ private:
         disconnectAction_->setEnabled(false);
         setNewGameActionsEnabled(false);
         restartGameAction_->setEnabled(false);
+        quitGameAction_->setEnabled(false);
     }
 
     void connectToServer() {
@@ -1155,6 +1183,7 @@ private:
             disconnectAction_->setEnabled(true);
             setNewGameActionsEnabled(true);
             restartGameAction_->setEnabled(true);
+            quitGameAction_->setEnabled(true);
             statusBar()->showMessage("Connected to " + address);
             refreshCompetitions();
         });
@@ -1355,6 +1384,7 @@ private:
             }
         }
         tableComplete_ = view.value("street").toString() == "Showdown" && playersWithChips == 1;
+        quitGameAction_->setEnabled(connected_ && !tableComplete_);
         if (tableComplete_ && !wasTableComplete) playSound(tableWinnerSound_);
         remainingPlayersCaption_->setText(tableComplete_ ? "Table Winner:" : "Remaining Players:");
         remainingPlayers_->setText(tableComplete_ ? tableWinner : QString::number(remaining));
@@ -1474,7 +1504,8 @@ private:
         sound.setVolume(0.65F);
     }
 
-    static void playSound(QSoundEffect& sound, int repetitions = 1) {
+    void playSound(QSoundEffect& sound, int repetitions = 1) {
+        if (!settings_.soundEffects) return;
         if (sound.source().isEmpty()) {
             for (int index = 0; index < repetitions; ++index) QApplication::beep();
             return;
@@ -1493,6 +1524,15 @@ private:
             playSound(wagerSound_, repetitions);
         }
         if (stackAfter == 0) playSound(allInSound_);
+    }
+
+    void setSoundEffectsButtonState() {
+        if (soundEffectsButton_ == nullptr) return;
+        const QSignalBlocker blocker(soundEffectsButton_);
+        soundEffectsButton_->setChecked(settings_.soundEffects);
+        soundEffectsButton_->setText(settings_.soundEffects ? QString::fromUtf8("🔊") : QString::fromUtf8("🔇"));
+        soundEffectsButton_->setToolTip(settings_.soundEffects ? "Turn off sound effects" : "Turn on sound effects");
+        soundEffectsButton_->setAccessibleName(settings_.soundEffects ? "Sound effects on" : "Sound effects off");
     }
 
     void playBustSounds(const QJsonObject& view) {
@@ -1937,6 +1977,41 @@ private:
         });
     }
 
+    void quitGame() {
+        if (!connected_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        QMessageBox confirmation(this);
+        confirmation.setIcon(QMessageBox::Warning);
+        confirmation.setWindowTitle("Quit game?");
+        confirmation.setText("This ends the current table and records its chip leader as the table winner.");
+        auto* quit = confirmation.addButton("Quit Game", QMessageBox::DestructiveRole);
+        confirmation.addButton(QMessageBox::Cancel);
+        confirmation.exec();
+        if (confirmation.clickedButton() != quit) return;
+
+        stopNextDealCountdown();
+        stopTurnCountdown();
+        const auto attempt = connectionGeneration_;
+        const auto path = "/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText() + "/quit";
+        auto* reply = postJson(path, QJsonObject{{"player", humanPlayer_ ? humanPlayer_->apiPlayerName() : QString{}}});
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto response = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (attempt != connectionGeneration_ || !connected_) return;
+            if (!success) {
+                QMessageBox::warning(this, "Quit game failed", response.value("error").toString("The server could not quit this table."));
+                refreshTableView();
+                return;
+            }
+            const auto winner = response.value("winner").toString();
+            clearHumanPlayer();
+            quitGameAction_->setEnabled(false);
+            statusBar()->showMessage("Game quit. Table winner: " + winner + '.');
+            refreshCompetitions();
+        });
+    }
+
     void newGame() {
         if (!connected_) return;
         bool accepted = false;
@@ -1988,9 +2063,10 @@ private:
 
     void customGame() {
         if (!connected_) return;
-        CustomGameDialog dialog(settings_.defaultPlayerName, availableReferencePlayerTypes_, this);
+        CustomGameDialog dialog(settings_.defaultPlayerName, availableReferencePlayerTypes_, lastCustomGameConfiguration_, this);
         if (dialog.exec() != QDialog::Accepted) return;
         const auto configuration = dialog.configuration();
+        lastCustomGameConfiguration_ = configuration;
         clearHumanPlayer();
         if (configuration.includeHuman) {
             settings_.defaultPlayerName = configuration.playerName;
@@ -2281,6 +2357,7 @@ private:
     QLabel* minimumWagerCaption_{};
     QLineEdit* minimumWagerValue_{};
     QPushButton* pausePlayButton_{};
+    QPushButton* soundEffectsButton_{};
     QLineEdit* amountEdit_{};
     QLineEdit* totalCommitment_{};
     QLabel* raiseSummary_{};
@@ -2299,6 +2376,8 @@ private:
     QAction* newGameAction_{};
     QAction* customGameAction_{};
     QAction* restartGameAction_{};
+    QAction* quitGameAction_{};
+    std::optional<CustomGameConfiguration> lastCustomGameConfiguration_;
     qsizetype autoConnectPortIndex_{};
     std::unique_ptr<bluffskill::client::HumanPlayer> pendingHumanPlayer_;
     std::unique_ptr<bluffskill::client::HumanPlayer> humanPlayer_;

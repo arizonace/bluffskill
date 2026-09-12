@@ -72,6 +72,14 @@ struct PayoutView {
     std::vector<PayoutAwardView> awards;
 };
 
+// The winner selected when a game is intentionally ended before its natural
+// conclusion. Ties are resolved by the lower one-based table seat.
+struct TableWinner {
+    std::string player;
+    std::size_t seat{0};
+    Chips chips{0};
+};
+
 struct TablePlayerView {
     std::string name;
     PlayerKind kind{PlayerKind::api};
@@ -137,6 +145,8 @@ public:
     void startHand();
     void startNextHand();
     void restartGame();
+    [[nodiscard]] TableWinner quitGame();
+    [[nodiscard]] bool isGameInProgress() const;
     void setBlindSchedule(BlindSchedule blindSchedule);
     [[nodiscard]] TableView viewFor(std::string_view viewerName = {}) const;
     [[nodiscard]] std::uint64_t eventSequence() const noexcept { return eventSequence_; }
@@ -192,6 +202,7 @@ private:
     std::vector<ActionView> history_;
     std::vector<PayoutView> payouts_;
     bool showdownOccurred_{false};
+    bool gameQuit_{false};
     std::uint64_t eventSequence_{0};
     std::optional<cards::Deck> deck_;
     std::mt19937_64 random_{std::random_device{}()};

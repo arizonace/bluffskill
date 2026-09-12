@@ -297,12 +297,7 @@ std::optional<CompetitionSummary> House::competition(std::string_view name) cons
 bool House::hasGamesInProgress() const {
     for (const auto& competition : competitions_) {
         for (const auto& table : competition.tables) {
-            const auto view = table->viewFor();
-            if (view.roundsPlayed == 0) continue;
-            const auto survivingPlayers = std::count_if(view.players.begin(), view.players.end(), [](const auto& player) {
-                return player.stack > 0;
-            });
-            if (survivingPlayers > 1) return true;
+            if (table->isGameInProgress()) return true;
         }
     }
     return false;
@@ -361,6 +356,12 @@ void House::restartTable(std::string_view competitionName, std::string_view tabl
     const auto tableIndex = findTableIndex(competition, tableName);
     competition.tables.at(tableIndex)->restartGame();
     advanceReferencePlayers(competition, tableIndex);
+}
+
+TableWinner House::quitGame(std::string_view competitionName, std::string_view tableName) {
+    auto& competition = findCompetition(competitionName);
+    const auto tableIndex = findTableIndex(competition, tableName);
+    return competition.tables.at(tableIndex)->quitGame();
 }
 
 void House::setBlindSchedule(BlindSchedule blindSchedule) {

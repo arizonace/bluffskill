@@ -49,7 +49,8 @@ public:
     [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
     [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
-    // A started table remains in progress until it has one surviving player.
+    // A started table remains in progress until it has one surviving player or
+    // is deliberately ended through quitGame().
     [[nodiscard]] bool hasGamesInProgress() const;
     void clear();
     // Types are registered with their server-side factories. Adapters use this
@@ -63,6 +64,7 @@ public:
         Action action, Chips amount, std::uint64_t expectedSequence);
     void startNextHand(std::string_view competitionName, std::string_view tableName);
     void restartTable(std::string_view competitionName, std::string_view tableName);
+    [[nodiscard]] TableWinner quitGame(std::string_view competitionName, std::string_view tableName);
     void setBlindSchedule(BlindSchedule blindSchedule);
 
 private:
