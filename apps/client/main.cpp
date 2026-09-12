@@ -1295,6 +1295,12 @@ private:
             release(reply);
             if (attempt != connectionGeneration_ || requestGeneration != tableViewRequestGeneration_ || !connected_) return;
             if (!success) {
+                if (status == 404) {
+                    clearHumanPlayer();
+                    refreshCompetitions();
+                    statusBar()->showMessage("The game no longer exists. Create a new game to continue.");
+                    return;
+                }
                 setActionControlsEnabled(false);
                 statusBar()->showMessage("Could not retrieve the current table state.");
                 return;
@@ -1883,6 +1889,7 @@ private:
         }
         settings_.defaultPlayerName = playerName;
         bluffskill::app_config::AppConfig::save(settings_);
+        clearHumanPlayer();
         const auto attempt = connectionGeneration_;
         pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName);
         setNewGameActionsEnabled(false);
@@ -1925,12 +1932,11 @@ private:
         CustomGameDialog dialog(settings_.defaultPlayerName, availableReferencePlayerTypes_, this);
         if (dialog.exec() != QDialog::Accepted) return;
         const auto configuration = dialog.configuration();
+        clearHumanPlayer();
         if (configuration.includeHuman) {
             settings_.defaultPlayerName = configuration.playerName;
             bluffskill::app_config::AppConfig::save(settings_);
             pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(configuration.playerName);
-        } else {
-            clearHumanPlayer();
         }
 
         auto referenceTypes = referencePlayerTypes(configuration.referencePlayers);

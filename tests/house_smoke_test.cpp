@@ -79,4 +79,22 @@ int main() {
     bluffskill::poker::House customChipsHouse{{}, {50, 200, 1'000}};
     const auto customChipsCompetition = customChipsHouse.createSingleTableTournament({.maximumPlayers = 2, .startingStack = 7'000});
     assert((customChipsCompetition.chipDenominations == bluffskill::poker::ChipDenominations{50, 200, 1'000}));
+
+    bluffskill::poker::House clearableHouse;
+    const auto clearableCompetition = clearableHouse.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7'000});
+    [[maybe_unused]] const auto firstPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Red", "One");
+    [[maybe_unused]] const auto secondPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Red", "Two");
+    [[maybe_unused]] const auto thirdPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Red", "Three");
+    assert(clearableHouse.hasGamesInProgress());
+    try {
+        clearableHouse.clear();
+        assert(false && "an active house must not be cleared");
+    } catch (const std::logic_error&) {
+    }
+
+    bluffskill::poker::House emptyHouse;
+    [[maybe_unused]] const auto emptyCompetition = emptyHouse.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7'000});
+    assert(!emptyHouse.hasGamesInProgress());
+    emptyHouse.clear();
+    assert(emptyHouse.competitions().empty());
 }

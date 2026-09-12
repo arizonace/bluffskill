@@ -179,10 +179,14 @@ public:
         setCentralWidget(splitter);
         auto* fileMenu = menuBar()->addMenu("File");
         auto* saveActionLogAction = fileMenu->addAction("Save Action Log…");
+        clearHouseAction_ = fileMenu->addAction("Clear House");
+        auto* clearLogAction = fileMenu->addAction("Clear Log");
         auto* appMenu = menuBar()->addMenu("Application");
         auto* settingsAction = appMenu->addAction("Settings…");
         auto* aboutAction = appMenu->addAction("About BluffSkill Server");
         connect(saveActionLogAction, &QAction::triggered, this, [this] { saveActionLog(); });
+        connect(clearHouseAction_, &QAction::triggered, this, [this] { clearHouse(); });
+        connect(clearLogAction, &QAction::triggered, this, [this] { clearLog(); });
         connect(settingsAction, &QAction::triggered, this, [this] { editSettings(); });
         connect(aboutAction, &QAction::triggered, this, [this] { showAbout(); });
         connect(tree_, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& position) { showTreeContextMenu(position); });
@@ -221,6 +225,7 @@ public:
         }
         tree_->expandAll();
         refreshActionLog();
+        refreshClearHouseAction();
     }
 
     bluffskill::poker::House& house() noexcept { return house_; }
@@ -241,6 +246,27 @@ private:
                 + "\nBuild number: " + QStringLiteral(BLUFFSKILL_BUILD_NUMBER)
                 + "\nBuild timestamp: " + QStringLiteral(BLUFFSKILL_BUILD_TIMESTAMP)
                 + "\n\n© AzoneLayer · azonelayer.com\nLicensed under the MIT License.");
+    }
+
+    void clearLog() {
+        log_->clear();
+        actionLog_->setRowCount(0);
+        actionLogCursors_.clear();
+        activeActionLogTableKey_.clear();
+    }
+
+    void clearHouse() {
+        if (house_.hasGamesInProgress()) {
+            refreshClearHouseAction();
+            return;
+        }
+        house_.clear();
+        clearLog();
+        refreshTree();
+    }
+
+    void refreshClearHouseAction() {
+        if (clearHouseAction_ != nullptr) clearHouseAction_->setEnabled(!house_.hasGamesInProgress());
     }
 
     struct ActionLogCursor {
@@ -365,7 +391,7 @@ private:
     }
 
     [[nodiscard]] static QString suggestedExportPath(const QString& fileName) {
-        return QDir(exportDirectory()).filePath(fileName);
+        return QDir(exportDirectory()).filePath(QDateTime::currentDateTime().toString("HHmm ") + fileName);
     }
 
     static void rememberExportDirectory(const QString& path) {
@@ -711,6 +737,7 @@ private:
     QTreeWidget* tree_{};
     QPlainTextEdit* log_{};
     QTableWidget* actionLog_{};
+    QAction* clearHouseAction_{};
     QHash<QString, ActionLogCursor> actionLogCursors_;
     QString activeActionLogTableKey_;
 };

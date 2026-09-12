@@ -49,6 +49,9 @@ public:
     [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
     [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
+    // A started table remains in progress until it has one surviving player.
+    [[nodiscard]] bool hasGamesInProgress() const;
+    void clear();
     // Types are registered with their server-side factories. Adapters use this
     // list rather than carrying their own type list.
     [[nodiscard]] std::vector<ReferencePlayerType> referencePlayerTypes() const;

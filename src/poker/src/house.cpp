@@ -294,6 +294,27 @@ std::optional<CompetitionSummary> House::competition(std::string_view name) cons
     return summaryOf(*found);
 }
 
+bool House::hasGamesInProgress() const {
+    for (const auto& competition : competitions_) {
+        for (const auto& table : competition.tables) {
+            const auto view = table->viewFor();
+            if (view.roundsPlayed == 0) continue;
+            const auto survivingPlayers = std::count_if(view.players.begin(), view.players.end(), [](const auto& player) {
+                return player.stack > 0;
+            });
+            if (survivingPlayers > 1) return true;
+        }
+    }
+    return false;
+}
+
+void House::clear() {
+    if (hasGamesInProgress()) throw std::logic_error("cannot clear a house with games in progress");
+    competitions_.clear();
+    nextCompetitionNameIndex_ = 0;
+    nextReferencePlayerNameIndex_ = 0;
+}
+
 std::vector<ReferencePlayerType> House::referencePlayerTypes() const {
     std::vector<ReferencePlayerType> types;
     types.reserve(referencePlayerRegistrations.size());

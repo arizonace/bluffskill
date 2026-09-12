@@ -62,6 +62,8 @@ The table projection also includes the dealer, small-blind, and big-blind seats;
 
 Each action-history item includes the acting player's `stackAfter`, plus the authoritative total `pot` and `currentBet` after that turn. This lets any connected client replay a server-returned batch of automated actions without reconstructing betting state or identifying as a player. Table views also include `startingStack`, so a restarted game can reset presentation before subsequent automated actions are shown.
 
+When the local server console clears its house, existing competition and table routes fail because their resources no longer exist. Clients must discard stale game state, show the error from the failed command, and return to the empty-house flow before creating a new game.
+
 ## Development-only localhost authentication
 
 The prototype may use a random per-server bearer token, printed only in the server console, accepted only on loopback, and reset on every process start. Store it only in the client’s memory. This is a convenience gate, not a security mechanism; it must refuse non-loopback bindings.
