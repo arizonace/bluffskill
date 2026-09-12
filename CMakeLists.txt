@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Widgets Network HttpServer)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Widgets Network HttpServer Multimedia)
 qt_standard_project_setup()
 
 add_subdirectory(src/cards)

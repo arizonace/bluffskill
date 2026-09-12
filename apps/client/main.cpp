@@ -21,6 +21,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QHash>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -29,6 +30,7 @@
 #include <QPixmap>
 #include <QRandomGenerator>
 #include <QStatusBar>
+#include <QSoundEffect>
 #include <QSet>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -516,8 +518,10 @@ private:
         if (!action.visible) return;
         const QRectF rect(center.x() - 31, center.y() - 19, 62, 38);
         painter.save();
-        painter.setPen(QPen(QColor("#262626"), 1));
-        painter.setBrush(QColor("#FFFDFC"));
+        const auto wager = action.name.compare("Bet", Qt::CaseInsensitive) == 0
+            || action.name.compare("Raise", Qt::CaseInsensitive) == 0;
+        painter.setPen(QPen(wager ? QColor("#7A3E00") : QColor("#262626"), 1));
+        painter.setBrush(wager ? QColor("#F4A340") : QColor("#FFFDFC"));
         painter.drawRoundedRect(rect, 12, 12);
         painter.setPen(QColor("#171717"));
         painter.setFont(QFont("Helvetica", 10, QFont::DemiBold));
@@ -842,9 +846,13 @@ private:
 
 class ClientWindow final : public QMainWindow {
 public:
-    ClientWindow() : settings_(bluffskill::app_config::AppConfig::load()) {
+    ClientWindow() : settings_(bluffskill::app_config::AppConfig::load()), bustSound_(this), wagerSound_(this), allInSound_(this), tableWinnerSound_(this) {
         setWindowTitle("BluffSkill");
         resize(1200, 1200);
+        configureSystemSound(bustSound_, "Basso.aiff");
+        configureSystemSound(wagerSound_, "Funk.aiff");
+        configureSystemSound(allInSound_, "Glass.aiff");
+        configureSystemSound(tableWinnerSound_, "Hero.aiff");
         auto* central = new QWidget(this);
         auto* layout = new QVBoxLayout(central);
         auto* connection = new QFrame(central);
@@ -1310,6 +1318,7 @@ private:
     }
 
     void applyTableView(const QJsonObject& view, bool restartPresentation = false) {
+        const auto wasTableComplete = tableComplete_;
         const auto previousStreet = lastStreet_;
         const auto deferShowdownForAutomatedActions = view.value("street").toString() == "Showdown"
             && (presentFinalAutomatedActions_ || humanPlayerBusted(view) || !humanPlayer_ || restartPresentation);
@@ -1326,6 +1335,7 @@ private:
             presentFinalAutomatedActions_ = false;
         }
         pokerTable_->setTableView(view);
+        playBustSounds(view);
         presentedCommunityCards_ = communityCards(view);
         queuedCommunityCardCount_ = presentedCommunityCards_.size();
         localHoleCardsWidget_->setCards(view.value("street").toString() == "Showdown" ? QStringList{} : pokerTable_->localHoleCards());
@@ -1345,6 +1355,7 @@ private:
             }
         }
         tableComplete_ = view.value("street").toString() == "Showdown" && playersWithChips == 1;
+        if (tableComplete_ && !wasTableComplete) playSound(tableWinnerSound_);
         remainingPlayersCaption_->setText(tableComplete_ ? "Table Winner:" : "Remaining Players:");
         remainingPlayers_->setText(tableComplete_ ? tableWinner : QString::number(remaining));
         const auto legal = view.value("legalActions").toObject();
@@ -1454,6 +1465,50 @@ private:
         return cards;
     }
 
+    static void configureSystemSound(QSoundEffect& sound, const QString& fileName) {
+#ifdef Q_OS_MACOS
+        sound.setSource(QUrl::fromLocalFile("/System/Library/Sounds/" + fileName));
+#else
+        Q_UNUSED(fileName);
+#endif
+        sound.setVolume(0.65F);
+    }
+
+    static void playSound(QSoundEffect& sound, int repetitions = 1) {
+        if (sound.source().isEmpty()) {
+            for (int index = 0; index < repetitions; ++index) QApplication::beep();
+            return;
+        }
+        sound.stop();
+        sound.setLoopCount(repetitions);
+        sound.play();
+    }
+
+    void playActionSound(const QString& action, qint64 resultingBet, qint64 bigBlind, qint64 stackAfter) {
+        const auto wager = action.compare("Bet", Qt::CaseInsensitive) == 0
+            || action.compare("Raise", Qt::CaseInsensitive) == 0;
+        if (wager) {
+            const auto repetitions = bigBlind > 0 && resultingBet > bigBlind * 10 ? 3
+                : bigBlind > 0 && resultingBet > bigBlind * 4 ? 2 : 1;
+            playSound(wagerSound_, repetitions);
+        }
+        if (stackAfter == 0) playSound(allInSound_);
+    }
+
+    void playBustSounds(const QJsonObject& view) {
+        QHash<QString, qint64> stacks;
+        bool playerBusted = false;
+        for (const auto& item : view.value("players").toArray()) {
+            const auto player = item.toObject();
+            const auto name = player.value("name").toString();
+            const auto stack = player.value("stack").toInteger();
+            if (knownPlayerStacks_.contains(name) && knownPlayerStacks_.value(name) > 0 && stack == 0) playerBusted = true;
+            stacks.insert(name, stack);
+        }
+        knownPlayerStacks_ = std::move(stacks);
+        if (playerBusted) playSound(bustSound_);
+    }
+
     void queueCommunityCardReveal(const QStringList& cards, qsizetype count, const QString& street) {
         if (queuedCommunityCardCount_ >= count || cards.size() < count) return;
         QStringList revealed;
@@ -1542,6 +1597,7 @@ private:
             const auto stackAfter = action.value("stackAfter").toInteger();
             const auto pot = action.value("pot").toInteger();
             const auto currentBet = action.value("currentBet").toInteger();
+            const auto bigBlind = view.value("bigBlind").toInteger();
             const auto player = std::ranges::find_if(players, [seat](const QJsonValue& value) {
                 return static_cast<std::size_t>(value.toObject().value("seat").toInt()) == seat;
             });
@@ -1549,11 +1605,12 @@ private:
                 && player->toObject().value("kind").toString() == "Reference";
             if (reference) automatedActionQueue_.append({.type = AutomatedActionPresentation::Type::playerAction,
                 .seat = seat, .player = playerName, .action = actionName, .amount = amount, .stackAfter = stackAfter,
-                .pot = pot, .currentBet = currentBet});
+                .pot = pot, .currentBet = currentBet, .bigBlind = bigBlind});
             else {
                 pokerTable_->showLastAction(seat, actionName, amount);
                 pokerTable_->showPlayerStack(seat, stackAfter);
                 pokerTable_->showActionState(pot, currentBet);
+                playActionSound(actionName, currentBet, bigBlind, stackAfter);
             }
         }
         if (preserveShowdownAutomatedActions) queueCommunityCardsThrough(cards, cards.size());
@@ -1582,6 +1639,7 @@ private:
             pokerTable_->showLastAction(action.seat, action.action, action.amount);
             pokerTable_->showPlayerStack(action.seat, action.stackAfter);
             pokerTable_->showActionState(action.pot, action.currentBet);
+            playActionSound(action.action, action.currentBet, action.bigBlind, action.stackAfter);
             statusBar()->showMessage(action.player + " " + action.action.toLower()
                 + (action.amount > 0 ? " " + QLocale().toString(action.amount) : "") + ".");
         }
@@ -1855,6 +1913,7 @@ private:
         displayedActionHistoryCount_ = 0;
         displayedActionHistory_.clear();
         presentedCommunityCards_.clear();
+        knownPlayerStacks_.clear();
         queuedCommunityCardCount_ = 0;
         automatedActionQueue_.clear();
         automatedActionTimer_.stop();
@@ -2161,6 +2220,7 @@ private:
         qint64 stackAfter{0};
         qint64 pot{0};
         qint64 currentBet{0};
+        qint64 bigBlind{0};
         QStringList communityCards;
     };
 
@@ -2197,6 +2257,11 @@ private:
     QTimer turnCountdownTimer_;
     QTimer automatedActionTimer_;
     QVector<AutomatedActionPresentation> automatedActionQueue_;
+    QSoundEffect bustSound_;
+    QSoundEffect wagerSound_;
+    QSoundEffect allInSound_;
+    QSoundEffect tableWinnerSound_;
+    QHash<QString, qint64> knownPlayerStacks_;
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};

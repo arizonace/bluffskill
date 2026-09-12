@@ -713,7 +713,7 @@ private:
                             const auto seat = static_cast<int>(player.seat);
                             if (player.folded || cursor.loggedShowdownHandSeats.contains(seat)) continue;
                             const auto lost = committedThroughAction(view, player.seat, view.actionHistory.size()) - winningsBySeat.value(seat);
-                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", round, "Hand", {}, QLocale().toString(player.stack),
+                            appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", round, "Lost", {}, QLocale().toString(player.stack),
                                 lostValue(lost), QLocale().toString(potValue), showdownHand(player), pokerNotation(player.holeCards));
                             cursor.loggedShowdownHandSeats.insert(seat);
                         }
