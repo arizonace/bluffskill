@@ -179,6 +179,31 @@ int main() {
     assert(improvedVirgoDecision.action == Action::bet);
     assert(improvedVirgoDecision.amount >= 50 && improvedVirgoDecision.amount <= 1000);
 
+    // New Virgo is deliberately selective heads-up: it does not complete a
+    // weak hand, but opens a premium hand with a controlled legal size.
+    const auto virgoWeakHeadsUp = headsUpPreflop("Virgo", {Suit::spades, Rank::seven}, {Suit::hearts, Rank::two});
+    std::mt19937_64 virgoWeakHeadsUpRandom{7};
+    assert(improvedVirgo.chooseResponse(virgoWeakHeadsUp, virgoWeakHeadsUpRandom).action == Action::fold);
+    const auto virgoPremiumHeadsUp = headsUpPreflop("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
+    std::mt19937_64 virgoPremiumHeadsUpRandom{7};
+    const auto virgoPremiumHeadsUpDecision = improvedVirgo.chooseResponse(virgoPremiumHeadsUp, virgoPremiumHeadsUpRandom);
+    assert(virgoPremiumHeadsUpDecision.action == Action::raise);
+    assert(virgoPremiumHeadsUpDecision.amount >= 200 && virgoPremiumHeadsUpDecision.amount <= 1000);
+
+    // Heads-up top pair may use Virgo's compact value size on a safe board.
+    const auto virgoThinValue = headsUpCheckedStreet("Virgo", Street::flop, {Suit::spades, Rank::ace}, {Suit::hearts, Rank::seven});
+    std::mt19937_64 virgoThinValueRandom{7};
+    const auto virgoThinValueDecision = improvedVirgo.chooseResponse(virgoThinValue, virgoThinValueRandom);
+    assert(virgoThinValueDecision.action == Action::bet);
+    assert(virgoThinValueDecision.amount >= 50 && virgoThinValueDecision.amount <= 300);
+
+    // A large heads-up river bet does not receive a speculative call with a
+    // one-pair hand.
+    auto virgoLargeRiver = headsUpCheckedStreet("Virgo", Street::river, {Suit::spades, Rank::ace}, {Suit::hearts, Rank::seven});
+    virgoLargeRiver.legalActions = LegalActions{.call = true, .fold = true, .callAmount = 600};
+    std::mt19937_64 virgoLargeRiverRandom{7};
+    assert(improvedVirgo.chooseResponse(virgoLargeRiver, virgoLargeRiverRandom).action == Action::fold);
+
     House house;
     const auto competition = house.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7000});
     const auto populated = house.createReferencePlayers(competition.name, 2);

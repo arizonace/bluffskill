@@ -20,7 +20,7 @@ The initial prototype uses one `TournamentCompetition`, one `Table`, at most ten
 | `ReferencePlayerController` | private in-process bot-controller interface: type, console-only parameters, and legal decision selection |
 | `AugustLeoReferencePlayer` / `AugustVirgoReferencePlayer` | preserved September 2026 policies for baseline and regression comparison |
 | `LeoReferencePlayer` | assertive policy with opponent-count-aware preflop ranges, deliberate opens and re-raises, street-to-street plans, heads-up adjustments, and intent-based pot-relative sizing |
-| `VirgoReferencePlayer` | selective policy using made-hand strength, draws, pot odds, public threat, and measured value/protection bets |
+| `VirgoReferencePlayer` | selective policy using made-hand strength, draws, pot odds, public threat, measured value/protection bets, and a guarded heads-up regime |
 | `Dealer` | automated system actor that advances forced operations |
 
 Use integer chip units (`std::int64_t`) rather than floating point. Every competition has a sorted, positive list of chip denominations; each denomination must be an integer multiple of the preceding denomination. Its smallest denomination is the wagering unit: starting stacks, forced blinds, bets, raises, and awarded pots must be exact multiples of it. This preserves chip-representable stacks even when an odd chip is assigned while splitting a pot. The initial default is `25, 100, 500, 1000`; server configuration may replace it before a competition is created. The starting small blind defaults to one smallest chip, and the big blind is twice the configured small blind. Betting legality and pots otherwise operate on integer value, which keeps future currencies and tournament rebuy rules manageable.
