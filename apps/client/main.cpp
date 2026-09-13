@@ -863,7 +863,7 @@ public:
         setWindowTitle("BluffSkill");
         resize(1200, 1200);
         configureSystemSound(bustSound_, "Basso.aiff");
-        configureSystemSound(wagerSound_, "Funk.aiff");
+        configureWagerSound(wagerSound_);
         configureSystemSound(allInSound_, "Glass.aiff");
         configureSystemSound(tableWinnerSound_, "Hero.aiff");
         auto* central = new QWidget(this);
@@ -1501,6 +1501,11 @@ private:
 #else
         Q_UNUSED(fileName);
 #endif
+        sound.setVolume(0.65F);
+    }
+
+    static void configureWagerSound(QSoundEffect& sound) {
+        sound.setSource(QUrl("qrc:/bluffskill/resources/wager_shaker.wav"));
         sound.setVolume(0.65F);
     }
 
