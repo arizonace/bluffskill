@@ -81,6 +81,8 @@ public:
         blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
         autoConnect_ = new QCheckBox("Automatically try preferred localhost ports", this); autoConnect_->setChecked(settings.clientAutoConnect);
+        detailedServerLogs_ = new QCheckBox("Include JSON request and response bodies in the local server log", this);
+        detailedServerLogs_->setChecked(settings.detailedServerLogs);
         for (int index = 0; index < 3; ++index) {
             ports_[index] = new QSpinBox(this); ports_[index]->setRange(1, 65535); ports_[index]->setValue(settings.serverPreferredPorts.value(index));
         }
@@ -96,6 +98,7 @@ public:
         layout->addRow("Preferred Port 2", ports_[1]);
         layout->addRow("Preferred Port 3", ports_[2]);
         layout->addRow("Client AutoConnect", autoConnect_);
+        layout->addRow("Detailed Server Logs", detailedServerLogs_);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Save, this);
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -112,6 +115,7 @@ public:
         value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
         value.clientAutoConnect = autoConnect_->isChecked();
+        value.detailedServerLogs = detailedServerLogs_->isChecked();
         value.serverPreferredPorts.clear();
         for (const auto* port : ports_) value.serverPreferredPorts.append(static_cast<quint16>(port->value()));
         return value;
@@ -141,6 +145,7 @@ private:
     QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
     QCheckBox* autoConnect_{};
+    QCheckBox* detailedServerLogs_{};
     std::array<QSpinBox*, 3> ports_{};
 };
 
@@ -202,6 +207,37 @@ public:
         QFile file(serverLogPath());
         if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) return;
         file.write((QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss  ") + message + '\n').toUtf8());
+    }
+
+    void logRequestJson(const QHttpServerRequest& request) {
+        if (!settings_.detailedServerLogs || request.body().isEmpty()) return;
+        QJsonParseError error;
+        const auto document = QJsonDocument::fromJson(request.body(), &error);
+        const auto json = error.error == QJsonParseError::NoError
+            ? QString::fromUtf8(document.toJson(QJsonDocument::Compact)) : QString::fromUtf8(request.body());
+        log("  Request JSON: " + json);
+    }
+
+    void logResponseJson(const QString& summary, const QJsonObject& body) {
+        log(summary);
+        if (settings_.detailedServerLogs) log("  Response JSON: " + QString::fromUtf8(QJsonDocument(body).toJson(QJsonDocument::Compact)));
+    }
+
+    void logResponseJson(const QString& summary, const QJsonArray& body) {
+        log(summary);
+        if (settings_.detailedServerLogs) log("  Response JSON: " + QString::fromUtf8(QJsonDocument(body).toJson(QJsonDocument::Compact)));
+    }
+
+    [[nodiscard]] QHttpServerResponse jsonResponse(const QString& summary, const QJsonObject& body,
+        QHttpServerResponder::StatusCode status = QHttpServerResponder::StatusCode::Ok) {
+        logResponseJson(summary, body);
+        return QHttpServerResponse(body, status);
+    }
+
+    [[nodiscard]] QHttpServerResponse jsonResponse(const QString& summary, const QJsonArray& body,
+        QHttpServerResponder::StatusCode status = QHttpServerResponder::StatusCode::Ok) {
+        logResponseJson(summary, body);
+        return QHttpServerResponse(body, status);
     }
 
     void refreshTree() {
@@ -986,12 +1022,13 @@ int main(int argc, char* argv[]) {
     QHttpServer server;
 
     server.route("/v1/health", [&window] {
-        window.log("GET /v1/health → 200");
-        return QHttpServerResponse(QJsonObject{{"status", "ok"}, {"referencePlayerTypes", referencePlayerTypesJson(window.house())}});
+        return window.jsonResponse("GET /v1/health → 200",
+            QJsonObject{{"status", "ok"}, {"referencePlayerTypes", referencePlayerTypesJson(window.house())}});
     });
 
     server.route("/v1/competitions", QHttpServerRequest::Method::Post,
         [&window](const QHttpServerRequest& request) -> QHttpServerResponse {
+            window.logRequestJson(request);
             const auto json = QJsonDocument::fromJson(request.body()).object();
             try {
                 const auto competition = window.house().createSingleTableTournament({
@@ -999,31 +1036,29 @@ int main(int argc, char* argv[]) {
                     .startingStack = static_cast<unsigned int>(json.value("startingStack").toInt(7000)),
                 });
                 window.refreshTree();
-                window.log("POST /v1/competitions → 201 (" + QString::fromStdString(competition.name) + ")");
-                return QHttpServerResponse(competitionJson(competition), QHttpServerResponder::StatusCode::Created);
+                return window.jsonResponse("POST /v1/competitions → 201 (" + QString::fromStdString(competition.name) + ')',
+                    competitionJson(competition), QHttpServerResponder::StatusCode::Created);
             } catch (const std::exception& exception) {
-                window.log("POST /v1/competitions → 400");
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
+                return window.jsonResponse("POST /v1/competitions → 400", QJsonObject{{"error", exception.what()}},
+                    QHttpServerResponder::StatusCode::BadRequest);
             }
         });
 
     server.route("/v1/competitions", [&window] {
         QJsonArray competitions;
         for (const auto& competition : window.house().competitions()) competitions.append(competitionJson(competition));
-        window.log("GET /v1/competitions → 200");
-        return QHttpServerResponse(competitions);
+        return window.jsonResponse("GET /v1/competitions → 200", competitions);
     });
 
     server.route("/v1/competitions/<arg>/tables", [&window](const QString& competitionName) -> QHttpServerResponse {
         const auto competition = window.house().competition(competitionName.toStdString());
         if (!competition) {
-            window.log("GET /v1/competitions/" + competitionName + "/tables → 404");
-            return QHttpServerResponse(QJsonObject{{"error", "competition was not found"}}, QHttpServerResponder::StatusCode::NotFound);
+            return window.jsonResponse("GET /v1/competitions/" + competitionName + "/tables → 404",
+                QJsonObject{{"error", "competition was not found"}}, QHttpServerResponder::StatusCode::NotFound);
         }
         QJsonArray tables;
         for (const auto& table : competition->tables) tables.append(tableJson(table));
-        window.log("GET /v1/competitions/" + competitionName + "/tables → 200");
-        return QHttpServerResponse(tables);
+        return window.jsonResponse("GET /v1/competitions/" + competitionName + "/tables → 200", tables);
     });
 
     server.route("/v1/competitions/<arg>/tables/<arg>/view", [&window](const QString& competitionName, const QString& tableName,
@@ -1031,16 +1066,17 @@ int main(int argc, char* argv[]) {
             const auto viewerName = QUrlQuery(request.url()).queryItemValue("viewer");
             try {
                 const auto table = window.house().tableView(competitionName.toStdString(), tableName.toStdString(), viewerName.toStdString());
-                window.log("GET /v1/competitions/" + competitionName + "/tables/" + tableName + "/view → 200");
+                window.logResponseJson("GET /v1/competitions/" + competitionName + "/tables/" + tableName + "/view → 200", tableViewJson(table));
                 return tableViewResponse(table);
             } catch (const std::exception& exception) {
-                window.log("GET /v1/competitions/" + competitionName + "/tables/" + tableName + "/view → 404");
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::NotFound);
+                return window.jsonResponse("GET /v1/competitions/" + competitionName + "/tables/" + tableName + "/view → 404",
+                    QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::NotFound);
             }
         });
 
     server.route("/v1/competitions/<arg>/tables/<arg>/actions", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            window.logRequestJson(request);
             const auto json = QJsonDocument::fromJson(request.body()).object();
             const auto action = parseAction(json.value("action").toString());
             const auto playerName = json.value("player").toString();
@@ -1051,8 +1087,9 @@ int main(int argc, char* argv[]) {
                 || (json.contains("amount") && (!json.value("amount").isDouble() || amountValue < 0
                     || static_cast<double>(static_cast<bluffskill::poker::Chips>(amountValue)) != amountValue));
             if (json.isEmpty() || !action || playerName.isEmpty() || invalidNumber) {
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → 400");
-                return QHttpServerResponse(QJsonObject{{"error", "action, player, expectedSequence, and a non-negative integer amount are required"}}, QHttpServerResponder::StatusCode::BadRequest);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → 400",
+                    QJsonObject{{"error", "action, player, expectedSequence, and a non-negative integer amount are required"}},
+                    QHttpServerResponder::StatusCode::BadRequest);
             }
             const auto amount = static_cast<bluffskill::poker::Chips>(amountValue);
             const auto sequence = static_cast<std::uint64_t>(sequenceValue);
@@ -1060,96 +1097,102 @@ int main(int argc, char* argv[]) {
                 window.house().submitAction(competitionName.toStdString(), tableName.toStdString(), playerName.toStdString(), *action, amount, sequence);
                 const auto table = window.house().tableView(competitionName.toStdString(), tableName.toStdString(), playerName.toStdString());
                 window.refreshTree();
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → 200");
+                window.logResponseJson("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → 200", tableViewJson(table));
                 return tableViewResponse(table);
             } catch (const bluffskill::poker::CommandError& exception) {
                 const auto status = exception.failure() == bluffskill::poker::CommandFailure::illegalAction
                     ? QHttpServerResponder::StatusCode::UnprocessableEntity : QHttpServerResponder::StatusCode::Conflict;
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → " + (status == QHttpServerResponder::StatusCode::Conflict ? "409" : "422"));
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, status);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → "
+                    + (status == QHttpServerResponder::StatusCode::Conflict ? "409" : "422"), QJsonObject{{"error", exception.what()}}, status);
             } catch (const std::exception& exception) {
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → 400");
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/actions → 400",
+                    QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
             }
         });
 
     server.route("/v1/competitions/<arg>/tables/<arg>/next-hand", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            window.logRequestJson(request);
             try {
                 const auto viewerName = QJsonDocument::fromJson(request.body()).object().value("viewer").toString();
                 window.house().startNextHand(competitionName.toStdString(), tableName.toStdString());
                 const auto table = window.house().tableView(competitionName.toStdString(), tableName.toStdString(), viewerName.toStdString());
                 window.refreshTree();
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/next-hand → 200");
+                window.logResponseJson("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/next-hand → 200", tableViewJson(table));
                 return tableViewResponse(table);
             } catch (const std::exception& exception) {
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName
-                    + "/next-hand → 409: " + QString::fromUtf8(exception.what()));
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName
+                    + "/next-hand → 409: " + QString::fromUtf8(exception.what()), QJsonObject{{"error", exception.what()}},
+                    QHttpServerResponder::StatusCode::Conflict);
             }
         });
 
     server.route("/v1/competitions/<arg>/tables/<arg>/restart", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            window.logRequestJson(request);
             try {
                 const auto viewerName = QJsonDocument::fromJson(request.body()).object().value("viewer").toString();
                 window.house().restartTable(competitionName.toStdString(), tableName.toStdString());
                 const auto table = window.house().tableView(competitionName.toStdString(), tableName.toStdString(), viewerName.toStdString());
                 window.refreshTree();
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/restart → 200");
+                window.logResponseJson("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/restart → 200", tableViewJson(table));
                 return tableViewResponse(table);
             } catch (const std::exception& exception) {
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/restart → 409");
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/restart → 409",
+                    QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
             }
         });
 
     server.route("/v1/competitions/<arg>/tables/<arg>/quit", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            window.logRequestJson(request);
             try {
                 const auto playerName = QJsonDocument::fromJson(request.body()).object().value("player").toString();
                 const auto winner = window.quitGame(competitionName, tableName, playerName);
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/quit → 200");
-                return QHttpServerResponse(QJsonObject{{"winner", QString::fromStdString(winner.player)},
-                    {"seat", static_cast<int>(winner.seat)}, {"chips", static_cast<qint64>(winner.chips)}});
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/quit → 200",
+                    QJsonObject{{"winner", QString::fromStdString(winner.player)}, {"seat", static_cast<int>(winner.seat)},
+                        {"chips", static_cast<qint64>(winner.chips)}});
             } catch (const std::exception& exception) {
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/quit → 409");
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/quit → 409",
+                    QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::Conflict);
             }
         });
 
     server.route("/v1/competitions/<arg>/tables/<arg>/players", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QString& tableName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            window.logRequestJson(request);
             const auto json = QJsonDocument::fromJson(request.body()).object();
             try {
                 const auto competition = window.house().createApiPlayer(
                     competitionName.toStdString(), tableName.toStdString(), json.value("name").toString().toStdString());
                 window.refreshTree();
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/players → 201");
-                return QHttpServerResponse(competitionJson(competition), QHttpServerResponder::StatusCode::Created);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/players → 201",
+                    competitionJson(competition), QHttpServerResponder::StatusCode::Created);
             } catch (const std::exception& exception) {
-                window.log("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/players → 400");
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/players → 400",
+                    QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
             }
         });
 
     server.route("/v1/competitions/<arg>/reference-players", QHttpServerRequest::Method::Post,
         [&window](const QString& competitionName, const QHttpServerRequest& request) -> QHttpServerResponse {
+            window.logRequestJson(request);
             const auto json = QJsonDocument::fromJson(request.body()).object();
             const auto type = parseReferencePlayerType(json.value("type").toString(), window.house());
             if (!type) {
-                window.log("POST /v1/competitions/" + competitionName + "/reference-players → 400");
-                return QHttpServerResponse(QJsonObject{{"error", "type must be one of: " + referencePlayerTypeNames(window.house())}}, QHttpServerResponder::StatusCode::BadRequest);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/reference-players → 400",
+                    QJsonObject{{"error", "type must be one of: " + referencePlayerTypeNames(window.house())}},
+                    QHttpServerResponder::StatusCode::BadRequest);
             }
             try {
                 const auto competition = window.house().createReferencePlayers(
                     competitionName.toStdString(), static_cast<std::size_t>(json.value("count").toInt()), *type);
                 window.refreshTree();
-                window.log("POST /v1/competitions/" + competitionName + "/reference-players → 201");
-                return QHttpServerResponse(competitionJson(competition), QHttpServerResponder::StatusCode::Created);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/reference-players → 201",
+                    competitionJson(competition), QHttpServerResponder::StatusCode::Created);
             } catch (const std::exception& exception) {
-                window.log("POST /v1/competitions/" + competitionName + "/reference-players → 400");
-                return QHttpServerResponse(QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
+                return window.jsonResponse("POST /v1/competitions/" + competitionName + "/reference-players → 400",
+                    QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
             }
         });
 

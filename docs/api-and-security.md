@@ -67,6 +67,8 @@ A quit request ends a started table without settling the active hand. The server
 
 When the local server console clears its house, existing competition and table routes fail because their resources no longer exist. Clients must discard stale game state, show the error from the failed command, and return to the empty-house flow before creating a new game.
 
+The server's persistent `Detailed Server Logs` preference is off by default. When enabled in the Server application's Settings, `server.log` records each JSON request body and every JSON response body as compact, single-line records following the route/status entry. These local troubleshooting records may include a viewer-projected hole-card value, so keep the log private and disable detailed logging outside controlled development use.
+
 ## Development-only localhost authentication
 
 The prototype may use a random per-server bearer token, printed only in the server console, accepted only on loopback, and reset on every process start. Store it only in the client’s memory. This is a convenience gate, not a security mechanism; it must refuse non-loopback bindings.
@@ -79,7 +81,7 @@ TLS protects transport confidentiality and integrity, but does not make a replay
 2. Issue a short-lived, audience-bound access token and a rotating refresh token in secure, HttpOnly cookies or OS secure storage.
 3. Bind each command to its authenticated player identity, table, `expectedSequence`, request ID, UTC expiry, and body digest.
 4. For higher assurance program clients, require OAuth 2.1 DPoP or mTLS, using established libraries and audited key storage. Verify the proof’s method/URL, token binding, nonce, expiry, and replay identifier.
-5. Rate-limit identity and IP; log accepted/rejected command metadata without logging tokens, hole cards, deck order, or secret material. The local server writes this operational log to `~/AzoneLayer/BluffSkill/server.log`, rotates it at midnight to `server-YYYYMMDD.log`, and keeps seven days. A user-requested server-console action-log export is separate from operational security logging: it retains a folding player's cards, the winner's cards for a fold win, and cards shown at showdown in a hidden `holeCards` value, must remain local/private, and must never be served through an API or client UI.
+5. Rate-limit identity and IP; by default, log accepted/rejected command metadata without logging tokens, hole cards, deck order, or secret material. `Detailed Server Logs` is a user-controlled local-development exception that records JSON request and response bodies. The local server writes this operational log to `~/AzoneLayer/BluffSkill/server.log`, rotates it at midnight to `server-YYYYMMDD.log`, and keeps seven days. A user-requested server-console action-log export is separate from operational security logging: it retains a folding player's cards, the winner's cards for a fold win, and cards shown at showdown in a hidden `holeCards` value, must remain local/private, and must never be served through an API or client UI.
 
 Sign server notifications with the TLS session in the normal case. If messages pass through an intermediary, use an established JWS/COSE implementation with rotating server keys and publish the verification key set. Never invent a custom MAC block, expose a symmetric client secret to a browser/client, or rely on a timestamp alone for replay protection.
 

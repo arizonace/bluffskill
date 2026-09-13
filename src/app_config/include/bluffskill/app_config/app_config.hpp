@@ -18,6 +18,7 @@ struct Settings {
     QList<quint16> serverPreferredPorts{53153, 53154, 53155};
     bool clientAutoConnect{false};
     bool soundEffects{true};
+    bool detailedServerLogs{false};
 };
 
 class AppConfig final {
