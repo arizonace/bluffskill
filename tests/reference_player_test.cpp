@@ -30,6 +30,46 @@ bluffskill::poker::TableView checkedFlop(std::string name, bluffskill::cards::Ca
     return view;
 }
 
+bluffskill::poker::TableView headsUpPreflop(std::string name, bluffskill::cards::Card first, bluffskill::cards::Card second) {
+    using namespace bluffskill::poker;
+    auto view = privateTurn(std::move(name), first, second);
+    view.smallBlind = 50;
+    view.bigBlind = 100;
+    view.smallBlindSeat = 1;
+    view.bigBlindSeat = 2;
+    view.players.front().dealer = true;
+    view.players.emplace_back(TablePlayerView{.name = "Opponent", .seat = 2, .stack = 1000});
+    return view;
+}
+
+bluffskill::poker::TableView fullRingPreflop(std::string name, bluffskill::cards::Card first, bluffskill::cards::Card second) {
+    using namespace bluffskill::poker;
+    auto view = headsUpPreflop(std::move(name), first, second);
+    for (std::size_t seat = 3; seat <= 10; ++seat) {
+        view.players.emplace_back(TablePlayerView{.name = "Opponent " + std::to_string(seat), .seat = seat, .stack = 1000});
+    }
+    return view;
+}
+
+bluffskill::poker::TableView headsUpCheckedStreet(std::string name, bluffskill::poker::Street street,
+    bluffskill::cards::Card first, bluffskill::cards::Card second) {
+    using namespace bluffskill::poker;
+    auto view = headsUpPreflop(std::move(name), first, second);
+    view.street = street;
+    view.communityCards = {{bluffskill::cards::Suit::clubs, bluffskill::cards::Rank::ace},
+        {bluffskill::cards::Suit::diamonds, bluffskill::cards::Rank::king},
+        {bluffskill::cards::Suit::hearts, bluffskill::cards::Rank::two}};
+    if (street == Street::turn || street == Street::river) {
+        view.communityCards.push_back({bluffskill::cards::Suit::clubs, bluffskill::cards::Rank::nine});
+    }
+    if (street == Street::river) {
+        view.communityCards.push_back({bluffskill::cards::Suit::diamonds, bluffskill::cards::Rank::four});
+    }
+    view.pots = {{.amount = street == Street::river ? 800 : 600, .eligibleSeats = {1, 2}}};
+    view.legalActions = LegalActions{.check = true, .bet = true, .fold = true, .minimumAmount = 50, .maximumAmount = 1000};
+    return view;
+}
+
 } // namespace
 
 int main() {
@@ -85,6 +125,52 @@ int main() {
     const auto improvedLeoDecision = improvedLeo.chooseResponse(aces, improvedLeoRandom);
     assert(improvedLeoDecision.action == Action::raise);
     assert(improvedLeoDecision.amount >= 200 && improvedLeoDecision.amount <= 1000);
+
+    // New Leo opens a materially wider heads-up range, while retaining a
+    // disciplined full-ring fold with the same marginal suited connector.
+    const auto suitedSevenFive = headsUpPreflop("Bold", {Suit::hearts, Rank::seven}, {Suit::hearts, Rank::five});
+    std::mt19937_64 headsUpRandom{7};
+    const auto headsUpDecision = improvedLeo.chooseResponse(suitedSevenFive, headsUpRandom);
+    assert(headsUpDecision.action == Action::raise);
+    assert(headsUpDecision.amount >= 200 && headsUpDecision.amount <= 1000);
+    const auto fullRingSevenFive = fullRingPreflop("Bold", {Suit::hearts, Rank::seven}, {Suit::hearts, Rank::five});
+    std::mt19937_64 fullRingRandom{7};
+    assert(improvedLeo.chooseResponse(fullRingSevenFive, fullRingRandom).action == Action::fold);
+
+    // A premium hand facing an open is re-raised from the wager already made,
+    // rather than from an arbitrary fraction of Leo's remaining stack.
+    auto threeBetSpot = headsUpPreflop("Bold", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
+    threeBetSpot.currentBet = 300;
+    threeBetSpot.legalActions = LegalActions{.call = true, .raise = true, .fold = true, .callAmount = 300, .minimumAmount = 600, .maximumAmount = 1000};
+    threeBetSpot.actionHistory.push_back({.player = "Opponent", .seat = 2, .street = Street::preflop, .action = Action::raise,
+        .amount = 300, .stackAfter = 700, .potAfter = 450, .currentBetAfter = 300});
+    std::mt19937_64 threeBetRandom{7};
+    const auto threeBetDecision = improvedLeo.chooseResponse(threeBetSpot, threeBetRandom);
+    assert(threeBetDecision.action == Action::raise);
+    assert(threeBetDecision.amount >= 600 && threeBetDecision.amount <= 1000);
+
+    // After a called flop bet, a weak turn is checked. A genuine made hand
+    // continues, and a river value bet uses Leo's larger polar sizing band.
+    auto weakTurn = headsUpCheckedStreet("Bold", Street::turn, {Suit::spades, Rank::seven}, {Suit::hearts, Rank::six});
+    weakTurn.actionHistory = {{.player = "Bold", .seat = 1, .street = Street::flop, .action = Action::bet, .amount = 250},
+        {.player = "Opponent", .seat = 2, .street = Street::flop, .action = Action::call, .amount = 250}};
+    std::mt19937_64 weakTurnRandom{7};
+    assert(improvedLeo.chooseResponse(weakTurn, weakTurnRandom).action == Action::check);
+
+    auto strongTurn = headsUpCheckedStreet("Bold", Street::turn, {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
+    strongTurn.actionHistory = weakTurn.actionHistory;
+    std::mt19937_64 strongTurnRandom{7};
+    const auto strongTurnDecision = improvedLeo.chooseResponse(strongTurn, strongTurnRandom);
+    assert(strongTurnDecision.action == Action::bet);
+    assert(strongTurnDecision.amount >= 50 && strongTurnDecision.amount <= 1000);
+
+    auto strongRiver = headsUpCheckedStreet("Bold", Street::river, {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});
+    strongRiver.actionHistory = {{.player = "Bold", .seat = 1, .street = Street::turn, .action = Action::bet, .amount = 350},
+        {.player = "Opponent", .seat = 2, .street = Street::turn, .action = Action::call, .amount = 350}};
+    std::mt19937_64 strongRiverRandom{7};
+    const auto strongRiverDecision = improvedLeo.chooseResponse(strongRiver, strongRiverRandom);
+    assert(strongRiverDecision.action == Action::bet);
+    assert(strongRiverDecision.amount >= 650 && strongRiverDecision.amount <= 1000);
 
     VirgoReferencePlayer improvedVirgo{"Virgo", {.curiosity = 0.5, .hope = 0.7, .empathy = 0.5, .longevity = 0.5}};
     auto strongFlop = checkedFlop("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});

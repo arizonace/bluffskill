@@ -19,7 +19,7 @@ The initial prototype uses one `TournamentCompetition`, one `Table`, at most ten
 | `PlayerController` | adapter interface for human/API/bot decisions; not the player identity |
 | `ReferencePlayerController` | private in-process bot-controller interface: type, console-only parameters, and legal decision selection |
 | `AugustLeoReferencePlayer` / `AugustVirgoReferencePlayer` | preserved September 2026 policies for baseline and regression comparison |
-| `LeoReferencePlayer` | assertive policy using made-hand strength, draws, pot odds, public pressure, and pot-relative sizing |
+| `LeoReferencePlayer` | assertive policy with opponent-count-aware preflop ranges, deliberate opens and re-raises, street-to-street plans, heads-up adjustments, and intent-based pot-relative sizing |
 | `VirgoReferencePlayer` | selective policy using made-hand strength, draws, pot odds, public threat, and measured value/protection bets |
 | `Dealer` | automated system actor that advances forced operations |
 
