@@ -17,3 +17,7 @@ add_test(NAME chip_invariant_test COMMAND chip_invariant_test)
 add_executable(reference_player_test reference_player_test.cpp)
 target_link_libraries(reference_player_test PRIVATE bluffskill_poker)
 add_test(NAME reference_player_test COMMAND reference_player_test)
+
+add_executable(app_config_test app_config_test.cpp)
+target_link_libraries(app_config_test PRIVATE bluffskill_app_config)
+add_test(NAME app_config_test COMMAND app_config_test)

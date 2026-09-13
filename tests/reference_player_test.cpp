@@ -211,7 +211,7 @@ int main() {
     assert(populated.tables.front().players.front().player.referenceType == ReferencePlayerType::leo);
     const auto mixed = house.createReferencePlayers(competition.name, 1, ReferencePlayerType::virgo);
     assert(mixed.tables.front().players.back().player.referenceType == ReferencePlayerType::virgo);
-    const auto virgoInspection = house.referencePlayerInspection(competition.name, "Red", mixed.tables.front().players.back().player.name);
+    const auto virgoInspection = house.referencePlayerInspection(competition.name, "Hydrogen", mixed.tables.front().players.back().player.name);
     assert(virgoInspection && virgoInspection->type == ReferencePlayerType::virgo);
     assert(virgoInspection->parameters.size() == 4);
     assert(mixed.tables.front().players.size() == 3);
@@ -219,17 +219,17 @@ int main() {
     House activeHouse;
     const auto activeCompetition = activeHouse.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7000});
     [[maybe_unused]] const auto activeReferences = activeHouse.createReferencePlayers(activeCompetition.name, 2);
-    const auto seated = activeHouse.createApiPlayer(activeCompetition.name, "Red", "Human");
+    const auto seated = activeHouse.createApiPlayer(activeCompetition.name, "Hydrogen", "Human");
     assert(seated.tables.front().players.size() == 3);
-    auto view = activeHouse.tableView(activeCompetition.name, "Red", "Human");
+    auto view = activeHouse.tableView(activeCompetition.name, "Hydrogen", "Human");
     assert(!view.actionHistory.empty());
     assert(!view.actingSeat || *view.actingSeat == 3);
 
     if (view.legalActions) {
         const auto& legal = *view.legalActions;
         const auto action = legal.check ? Action::check : legal.call ? Action::call : Action::fold;
-        activeHouse.submitAction(activeCompetition.name, "Red", "Human", action, 0, view.eventSequence);
-        view = activeHouse.tableView(activeCompetition.name, "Red", "Human");
+        activeHouse.submitAction(activeCompetition.name, "Hydrogen", "Human", action, 0, view.eventSequence);
+        view = activeHouse.tableView(activeCompetition.name, "Hydrogen", "Human");
         assert(!view.actingSeat || *view.actingSeat == 3);
     }
 }

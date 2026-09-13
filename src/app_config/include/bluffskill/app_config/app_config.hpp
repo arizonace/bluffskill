@@ -6,6 +6,16 @@
 namespace bluffskill::app_config {
 
 struct Settings {
+    Settings() {
+        chipDenominations.append(25);
+        chipDenominations.append(100);
+        chipDenominations.append(500);
+        chipDenominations.append(1000);
+        serverPreferredPorts.append(53153);
+        serverPreferredPorts.append(53154);
+        serverPreferredPorts.append(53155);
+    }
+
     int playerClockSeconds{120};
     int dealClockSeconds{20};
     int uninterruptedDealerDelayMilliseconds{5'000};
@@ -13,9 +23,9 @@ struct Settings {
     int smallBlind{1}; // Number of smallest chip.
     int blindHandsPerLevel{16};
     int blindMinutesPerLevel{20};
-    QList<qint64> chipDenominations{25, 100, 500, 1000};
+    QList<qint64> chipDenominations;
     QString defaultPlayerName{"Player"};
-    QList<quint16> serverPreferredPorts{53153, 53154, 53155};
+    QList<quint16> serverPreferredPorts;
     bool clientAutoConnect{false};
     bool soundEffects{true};
     bool detailedServerLogs{false};

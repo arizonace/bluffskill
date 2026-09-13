@@ -1,6 +1,7 @@
 #include "bluffskill/poker/house.hpp"
 
 #include <cassert>
+#include <cctype>
 #include <set>
 #include <vector>
 
@@ -13,28 +14,34 @@ int main() {
         bluffskill::poker::ReferencePlayerType::augustVirgo,
     }));
     const auto created = house.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7000});
+    assert(created.tables.front().name == "Hydrogen");
+    assert(created.tables.front().gameName == "Red");
     const auto populated = house.createReferencePlayers(created.name, 6);
     assert(populated.tables.front().players.size() == 6);
     std::set<std::string> names;
     std::set<std::size_t> seats;
     for (const auto& seatedPlayer : populated.tables.front().players) {
         assert(seatedPlayer.player.kind == bluffskill::poker::PlayerKind::reference);
+        assert(seatedPlayer.player.name.size() > 3);
+        for (const auto character : seatedPlayer.player.name.substr(seatedPlayer.player.name.size() - 3)) {
+            assert(std::isdigit(static_cast<unsigned char>(character)));
+        }
         names.insert(seatedPlayer.player.name);
         seats.insert(seatedPlayer.seat);
     }
     assert(names.size() == 6);
     assert(seats == std::set<std::size_t>({1, 2, 3, 4, 5, 6}));
-    const auto inspection = house.referencePlayerInspection(created.name, "Red", *names.begin());
+    const auto inspection = house.referencePlayerInspection(created.name, "Hydrogen", *names.begin());
     assert(inspection && inspection->type == bluffskill::poker::ReferencePlayerType::leo);
     assert(inspection->parameters.size() == 3);
     for (const auto& parameter : inspection->parameters) assert(parameter.value >= 0.15 && parameter.value <= 0.85);
 
-    const auto withApiPlayer = house.createApiPlayer(created.name, "Red", "Arizona");
+    const auto withApiPlayer = house.createApiPlayer(created.name, "Hydrogen", "Arizona");
     const auto& seatedApiPlayer = withApiPlayer.tables.front().players.back();
     assert(seatedApiPlayer.player.name == "Arizona");
     assert(seatedApiPlayer.player.kind == bluffskill::poker::PlayerKind::api);
     assert(seatedApiPlayer.seat == 7);
-    assert(!house.referencePlayerInspection(created.name, "Red", "Arizona"));
+    assert(!house.referencePlayerInspection(created.name, "Hydrogen", "Arizona"));
 
     bluffskill::poker::House mixedHouse;
     const auto mixedCompetition = mixedHouse.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7'000});
@@ -61,18 +68,18 @@ int main() {
     for (std::size_t index = 0; index < allTypes->tables.front().players.size(); ++index) {
         const auto& player = allTypes->tables.front().players[index].player;
         assert(player.referenceType == allTypesHouse.referencePlayerTypes()[index]);
-        const auto inspection = allTypesHouse.referencePlayerInspection(allTypesCompetition.name, "Red", player.name);
+        const auto inspection = allTypesHouse.referencePlayerInspection(allTypesCompetition.name, "Hydrogen", player.name);
         assert(inspection && inspection->type == *player.referenceType);
     }
 
     bluffskill::poker::House stagedHouse;
     const auto staged = stagedHouse.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7'000});
     [[maybe_unused]] const auto stagedReferences = stagedHouse.createReferencePlayers(staged.name, 3);
-    const auto stagedWithHuman = stagedHouse.createApiPlayer(staged.name, "Red", "Human");
+    const auto stagedWithHuman = stagedHouse.createApiPlayer(staged.name, "Hydrogen", "Human");
     assert(stagedWithHuman.tables.front().players.back().seat == 4);
-    assert(stagedHouse.tableView(staged.name, "Red", "Human").street == bluffskill::poker::Street::waiting);
+    assert(stagedHouse.tableView(staged.name, "Hydrogen", "Human").street == bluffskill::poker::Street::waiting);
     [[maybe_unused]] const auto stagedFinalReferences = stagedHouse.createReferencePlayers(staged.name, 6);
-    const auto fullTable = stagedHouse.tableView(staged.name, "Red", "Human");
+    const auto fullTable = stagedHouse.tableView(staged.name, "Hydrogen", "Human");
     assert(fullTable.players.size() == 10);
     assert(fullTable.street != bluffskill::poker::Street::waiting);
 
@@ -82,16 +89,16 @@ int main() {
 
     bluffskill::poker::House clearableHouse;
     const auto clearableCompetition = clearableHouse.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7'000});
-    [[maybe_unused]] const auto firstPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Red", "One");
-    [[maybe_unused]] const auto secondPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Red", "Two");
-    [[maybe_unused]] const auto thirdPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Red", "Three");
+    [[maybe_unused]] const auto firstPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Hydrogen", "One");
+    [[maybe_unused]] const auto secondPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Hydrogen", "Two");
+    [[maybe_unused]] const auto thirdPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Hydrogen", "Three");
     assert(clearableHouse.hasGamesInProgress());
     try {
         clearableHouse.clear();
         assert(false && "an active house must not be cleared");
     } catch (const std::logic_error&) {
     }
-    const auto quitWinner = clearableHouse.quitGame(clearableCompetition.name, "Red");
+    const auto quitWinner = clearableHouse.quitGame(clearableCompetition.name, "Hydrogen");
     assert(quitWinner.player == "One");
     assert(quitWinner.seat == 1);
     assert(quitWinner.chips == 7'000);
@@ -104,4 +111,16 @@ int main() {
     assert(!emptyHouse.hasGamesInProgress());
     emptyHouse.clear();
     assert(emptyHouse.competitions().empty());
+
+    bluffskill::poker::House gameNameHouse;
+    const auto namedCompetition = gameNameHouse.createSingleTableTournament({.maximumPlayers = 2, .startingStack = 7'000});
+    [[maybe_unused]] const auto namedOne = gameNameHouse.createApiPlayer(namedCompetition.name, "Hydrogen", "First");
+    [[maybe_unused]] const auto namedTwo = gameNameHouse.createApiPlayer(namedCompetition.name, "Hydrogen", "Second");
+    for (int restart = 0; restart < 99; ++restart) gameNameHouse.restartTable(namedCompetition.name, "Hydrogen");
+    assert(gameNameHouse.tableView(namedCompetition.name, "Hydrogen").gameName == "IndianRed");
+    try {
+        gameNameHouse.restartTable(namedCompetition.name, "Hydrogen");
+        assert(false && "a competition must not create a 101st game");
+    } catch (const std::runtime_error&) {
+    }
 }

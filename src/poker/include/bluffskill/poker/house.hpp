@@ -23,6 +23,7 @@ struct TournamentSpec {
 
 struct TableSummary {
     std::string name;
+    std::string gameName;
     std::size_t maximumSeats{0};
     struct SeatedPlayer {
         PlayerSummary player;
@@ -77,12 +78,14 @@ private:
         };
         std::vector<SeatedPlayer> players;
         std::vector<std::unique_ptr<Table>> tables;
+        std::size_t nextGameNameIndex{1}; // The first game is assigned at table creation.
     };
 
     [[nodiscard]] Competition& findCompetition(std::string_view name);
     [[nodiscard]] const Competition* findCompetition(std::string_view name) const;
     [[nodiscard]] CompetitionSummary summaryOf(const Competition& competition) const;
     [[nodiscard]] std::string nextCompetitionName();
+    [[nodiscard]] std::string nextGameName(Competition& competition);
     [[nodiscard]] std::string nextReferencePlayerName(const Competition& competition);
     [[nodiscard]] std::size_t findTableIndex(const Competition& competition, std::string_view tableName) const;
     [[nodiscard]] Table& findTable(Competition& competition, std::string_view tableName);

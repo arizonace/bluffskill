@@ -9,6 +9,8 @@
 #include <array>
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 
 namespace bluffskill::poker {
@@ -24,6 +26,32 @@ constexpr std::array competitionNames{
     "Laguna", "Lisbon", "Lumeria", "Luxor", "Madison", "Meridian", "Monaco", "Montreal",
     "Nairobi", "Nebula", "Newcastle", "Nimrod", "Olympia", "Orion", "Oslo", "Palmyra",
     "Persepolis", "Phoenix", "Prague", "Rivendell", "Sahara", "Samarkand", "Triton", "Zephyr",
+};
+
+// A competition currently supports exactly one table. The static element pool
+// reserves the finite future table namespace, with Hydrogen always first.
+constexpr std::array tableNames{
+    "Hydrogen", "Helium", "Lithium", "Beryllium", "Boron",
+    "Carbon", "Nitrogen", "Oxygen", "Fluorine", "Neon",
+};
+
+// Game identities are colors, in the requested priority order.  A competition
+// cannot create a 101st game.
+constexpr std::array gameNames{
+    "Red", "Orange", "Yellow", "Green", "Blue", "Indigo", "Violet",
+    "Cyan", "Magenta", "Black", "White", "Gray",
+    "Amber", "Teal", "Purple", "Lime", "Pink", "Brown",
+    "Beige", "Coral", "Crimson", "Gold", "Silver", "Bronze", "Copper", "Navy",
+    "Olive", "Maroon", "Turquoise", "Aqua", "Lavender", "Peach", "Tan", "Khaki",
+    "Ivory", "Charcoal", "Scarlet", "Ruby", "Rose", "Salmon", "Apricot", "Plum",
+    "Orchid", "Fuchsia", "Mauve", "Burgundy", "Mustard", "Saffron", "Mint", "Emerald",
+    "Jade", "Sapphire", "Azure", "Cerulean", "Cobalt", "Denim", "Periwinkle", "Slate",
+    "SteelBlue", "MidnightBlue", "SkyBlue", "RoyalBlue", "SeaGreen", "ForestGreen", "Chartreuse", "SpringGreen",
+    "YellowGreen", "Goldenrod", "Chocolate", "Sienna", "SandyBrown", "Wheat", "Linen", "Snow",
+    "Gainsboro", "LightGray", "DarkGray", "DimGray", "LightSlateGray", "DarkSlateGray", "AliceBlue", "AntiqueWhite",
+    "BlanchedAlmond", "BlueViolet", "CadetBlue", "CornflowerBlue", "DarkCyan", "DarkGoldenrod", "DarkKhaki", "DarkOliveGreen",
+    "DarkOrange", "DarkOrchid", "DarkRed", "DeepPink", "DeepSkyBlue", "DodgerBlue", "FireBrick", "GhostWhite",
+    "HotPink", "IndianRed"
 };
 
 constexpr std::array referencePlayerNames{
@@ -42,6 +70,23 @@ constexpr std::array referencePlayerNames{
     "Capybara", "Cassowary", "Chameleon", "Chipmunk", "Cormorant", "Dingo", "Dragonfly", "Egret",
     "Fennec", "Goldfinch", "Grouse", "Kingfisher", "Lobster", "Manta", "Nuthatch", "Puffin",
     "Sable", "Starling", "Tamarin", "Tern", "Vicuna", "Wagtail", "Zorilla", "Kangaroo",
+    "Addax", "Anaconda", "Angelfish", "Anteater", "Avocet", "Baboon", "Basilisk", "Binturong",
+    "Blackbird", "Bluebird", "Bonobo", "Budgerigar", "Bullfinch", "Bumblebee", "Caiman", "Canary",
+    "Caracal", "Cardinal", "Chinchilla", "Cicada", "Coati", "Cobra", "Cockatoo", "Cricket",
+    "Crocodile", "Curlew", "Darter", "Dugong", "Echidna", "Eel", "Falconet", "Finch",
+    "Frigatebird", "Frog", "Galago", "Gibbon", "Gnu", "Gorilla", "Grasshopper", "Grebe",
+    "GuineaFowl", "Hamster", "Harrier", "Hedgehog", "Hoopoe", "Hornbill", "Kakapo", "Kakaw",
+    "Kinglet", "Kinkajou", "Kite", "Lark", "Lemming", "Lionfish", "Loris", "Macaw",
+    "Mantis", "Marmot", "Mink", "Mole", "Monitor", "Mudskipper", "Myna", "Nautilus",
+    "Needlefish", "Numbat", "Okapi", "Oliveback", "Pangolin", "Parakeet", "Pheasant", "Pika",
+    "Polecat", "Porcupine", "Possum", "Pronghorn", "Pudu", "Python", "Quetzal", "Quokka",
+    "Rail", "Redwing", "Roadrunner", "Rooster", "Sandpiper", "Saola", "Scorpion", "Seahorse",
+    "Shrew", "Shrike", "Skink", "Skipper", "Snail", "Snipe", "Squirrel", "Stingray",
+    "SugarGlider", "Sunbird", "Tarsier", "Termite", "Thrush", "Treefrog", "Uakari", "Urial",
+    "Wallaby", "Warbler", "Waxwing", "Wildebeest", "Woodcock", "Wren", "Xerus", "Yellowhammer",
+    "Zebu", "Zokor", "Arowana", "Barramundi", "Cavy", "Dunnart", "Emu", "GeckoFish",
+    "Hare", "Impala", "Jerboa", "Kiwi", "Lamprey", "Manakin", "NightingaleFish", "Onager",
+    "Potoroo", "Rhea", "Takin", "Vole", "Whimbrel", "Xantus", "Yabby", "Zander",
 };
 
 template <typename T, std::size_t size>
@@ -114,6 +159,13 @@ std::string House::nextCompetitionName() {
     return competitionNamePool_.at(nextCompetitionNameIndex_++);
 }
 
+std::string House::nextGameName(Competition& competition) {
+    if (competition.nextGameNameIndex >= gameNames.size()) {
+        throw std::runtime_error("game name pool is exhausted after 100 games");
+    }
+    return std::string{gameNames.at(competition.nextGameNameIndex++)};
+}
+
 CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
     if (spec.maximumPlayers == 0 || spec.maximumPlayers > 10) {
         throw std::invalid_argument("maximumPlayers must be between 1 and 10");
@@ -125,11 +177,12 @@ CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
         .style = CompetitionStyle::tournament,
         .tournament = spec,
         .chipDenominations = chipDenominations_,
-        .tables = {{.name = "Red", .maximumSeats = spec.maximumPlayers}},
+        .tables = {{.name = std::string{tableNames.front()}, .gameName = std::string{gameNames.front()}, .maximumSeats = spec.maximumPlayers}},
     };
     Competition competition{.summary = std::move(summary)};
     competition.tables.push_back(std::make_unique<Table>(competition.summary.tables.front().name,
-        competition.summary.tables.front().maximumSeats, static_cast<Chips>(spec.startingStack), blindSchedule_, chipDenominations_));
+        competition.summary.tables.front().maximumSeats, static_cast<Chips>(spec.startingStack), blindSchedule_, chipDenominations_,
+        competition.summary.tables.front().gameName));
     competitions_.push_back(std::move(competition));
     return summaryOf(competitions_.back());
 }
@@ -153,7 +206,10 @@ const House::Competition* House::findCompetition(std::string_view name) const {
 
 std::string House::nextReferencePlayerName(const Competition& competition) {
     while (nextReferencePlayerNameIndex_ < referencePlayerNamePool_.size()) {
-        const auto candidate = referencePlayerNamePool_.at(nextReferencePlayerNameIndex_++);
+        std::ostringstream candidateBuilder;
+        candidateBuilder << referencePlayerNamePool_.at(nextReferencePlayerNameIndex_++)
+            << std::setw(3) << std::setfill('0') << std::uniform_int_distribution<int>(0, 999)(random_);
+        const auto candidate = candidateBuilder.str();
         const auto exists = std::ranges::any_of(competition.players, [&candidate](const auto& player) {
             return normalizeName(player.player->name()) == normalizeName(candidate);
         });
@@ -267,7 +323,10 @@ void House::startTableIfReady(Competition& competition, std::size_t tableIndex) 
 
 CompetitionSummary House::summaryOf(const Competition& competition) const {
     auto summary = competition.summary;
-    for (auto& table : summary.tables) table.players.clear();
+    for (std::size_t index = 0; index < summary.tables.size(); ++index) {
+        summary.tables[index].players.clear();
+        summary.tables[index].gameName = competition.tables.at(index)->viewFor().gameName;
+    }
     for (const auto& player : competition.players) {
         std::optional<ReferencePlayerType> referenceType;
         if (player.player->kind() == PlayerKind::reference) {
@@ -354,7 +413,9 @@ void House::startNextHand(std::string_view competitionName, std::string_view tab
 void House::restartTable(std::string_view competitionName, std::string_view tableName) {
     auto& competition = findCompetition(competitionName);
     const auto tableIndex = findTableIndex(competition, tableName);
-    competition.tables.at(tableIndex)->restartGame();
+    const auto gameName = nextGameName(competition);
+    competition.tables.at(tableIndex)->restartGame(gameName);
+    competition.summary.tables.at(tableIndex).gameName = gameName;
     advanceReferencePlayers(competition, tableIndex);
 }
 

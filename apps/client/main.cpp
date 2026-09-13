@@ -8,6 +8,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QDoubleValidator>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -666,8 +667,8 @@ public:
         }
         layout->addRow("Player Clock (seconds)", playerClock_);
         layout->addRow("Deal Clock (seconds)", dealClock_);
-        layout->addRow("Uninterrupted Dealer Delay", uninterruptedDealerDelay_);
-        layout->addRow("Automated Player Delay", automatedPlayerDelay_);
+        layout->addRow("Uninterrupted Dealer Delay (fractional seconds)", uninterruptedDealerDelay_);
+        layout->addRow("Automated Player Delay (fractional seconds)", automatedPlayerDelay_);
         layout->addRow("Small Blind (number of smallest chip)", smallBlind_);
         layout->addRow("Blind Increase (hands)", blindHands_);
         layout->addRow("Blind Increase (minutes)", blindMinutes_);
@@ -700,24 +701,23 @@ public:
     }
 
 private:
-    static QDoubleSpinBox* delaySpinBox(int milliseconds, QWidget* parent) {
-        auto* control = new QDoubleSpinBox(parent);
-        control->setRange(0.001, 3'600.0);
-        control->setDecimals(3);
-        control->setSingleStep(0.100);
-        control->setSuffix(" seconds");
-        control->setValue(static_cast<double>(milliseconds) / 1'000.0);
+    static QLineEdit* delaySpinBox(int milliseconds, QWidget* parent) {
+        auto* control = new QLineEdit(parent);
+        control->setValidator(new QDoubleValidator(0.001, 3'600.0, 3, control));
+        control->setText(QString::number(static_cast<double>(milliseconds) / 1'000.0, 'g', 15));
         return control;
     }
 
-    static int milliseconds(const QDoubleSpinBox& control) {
-        return static_cast<int>(std::llround(control.value() * 1'000.0));
+    static int milliseconds(const QLineEdit& control) {
+        bool valid = false;
+        const auto seconds = control.text().toDouble(&valid);
+        return valid ? static_cast<int>(std::llround(seconds * 1'000.0)) : 1;
     }
 
     QSpinBox* playerClock_{};
     QSpinBox* dealClock_{};
-    QDoubleSpinBox* uninterruptedDealerDelay_{};
-    QDoubleSpinBox* automatedPlayerDelay_{};
+    QLineEdit* uninterruptedDealerDelay_{};
+    QLineEdit* automatedPlayerDelay_{};
     QSpinBox* smallBlind_{};
     QSpinBox* blindHands_{};
     QSpinBox* blindMinutes_{};
@@ -778,6 +778,7 @@ private:
 
 struct CustomGameConfiguration {
     bool includeHuman{true};
+    int repetitions{1};
     QString playerName;
     struct ReferencePlayerCount {
         QString type;
@@ -797,9 +798,13 @@ public:
         includeHuman_ = new QCheckBox("Include local human player", this);
         includeHuman_->setChecked(previous ? previous->includeHuman : true);
         playerName_ = new QLineEdit(previous ? previous->playerName : defaultPlayerName, this);
+        repetitions_ = new QSpinBox(this);
+        repetitions_->setRange(1, 28);
+        repetitions_->setValue(previous ? previous->repetitions : 1);
         total_ = new QLabel(this);
         form->addRow("Human player", includeHuman_);
         form->addRow("Player name", playerName_);
+        form->addRow("Repetitions", repetitions_);
         for (const auto& type : referencePlayerTypes) {
             auto* count = new QSpinBox(this);
             count->setRange(0, defaultTableSeats);
@@ -828,7 +833,8 @@ public:
     }
 
     [[nodiscard]] CustomGameConfiguration configuration() const {
-        CustomGameConfiguration configuration{.includeHuman = includeHuman_->isChecked(), .playerName = playerName_->text().trimmed()};
+        CustomGameConfiguration configuration{.includeHuman = includeHuman_->isChecked(), .repetitions = repetitions_->value(),
+            .playerName = playerName_->text().trimmed()};
         for (const auto& player : referencePlayers_) {
             configuration.referencePlayers.append({.type = player.type, .count = player.count->value()});
         }
@@ -848,6 +854,7 @@ private:
 
     QCheckBox* includeHuman_{};
     QLineEdit* playerName_{};
+    QSpinBox* repetitions_{};
     struct ReferencePlayerControl {
         QString type;
         QSpinBox* count{};
@@ -1438,6 +1445,12 @@ private:
             stopTurnCountdown();
             if (tableComplete_) {
                 stopNextDealCountdown();
+                if (!humanPlayer_ && automatedRepetitionsRemaining_ > 0) {
+                    --automatedRepetitionsRemaining_;
+                    statusBar()->showMessage("Table winner: " + tableWinner + ". Starting the next automated game…");
+                    QTimer::singleShot(settings_.uninterruptedDealerDelayMilliseconds, this, [this] { restartAutomatedGame(); });
+                    return;
+                }
                 statusBar()->showMessage("Table winner: " + tableWinner + ". The game is complete. Choose Game → Restart Game to play again.");
                 return;
             }
@@ -1982,6 +1995,25 @@ private:
         });
     }
 
+    void restartAutomatedGame() {
+        if (!connected_ || humanPlayer_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        const auto path = "/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText() + "/restart";
+        auto* reply = postJson(path, QJsonObject{});
+        connect(reply, &QNetworkReply::finished, this, [this, reply] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto response = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (!connected_) return;
+            if (!success) {
+                automatedRepetitionsRemaining_ = 0;
+                statusBar()->showMessage(response.value("error").toString("The server could not start the next automated game."));
+                return;
+            }
+            applyTableView(response, true);
+        });
+    }
+
     void quitGame() {
         if (!connected_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
         QMessageBox confirmation(this);
@@ -2061,7 +2093,7 @@ private:
             const auto competitionName = competition.value("name").toString();
             addReferencePlayers(competitionName, attempt, std::move(referencesBeforeHuman),
                 [this, competitionName, attempt, humanSeat, referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
-                    attachHumanPlayer(competitionName, "Red", attempt, humanSeat, std::move(referencesAfterHuman));
+                    attachHumanPlayer(competitionName, "Hydrogen", attempt, humanSeat, std::move(referencesAfterHuman));
                 });
         });
     }
@@ -2072,6 +2104,7 @@ private:
         if (dialog.exec() != QDialog::Accepted) return;
         const auto configuration = dialog.configuration();
         lastCustomGameConfiguration_ = configuration;
+        automatedRepetitionsRemaining_ = configuration.includeHuman ? 0 : configuration.repetitions - 1;
         clearHumanPlayer();
         if (configuration.includeHuman) {
             settings_.defaultPlayerName = configuration.playerName;
@@ -2112,12 +2145,14 @@ private:
             addReferencePlayers(competitionName, attempt, std::move(referencesBeforeHuman),
                 [this, competitionName, attempt, configuration, humanSeat, referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
                     if (configuration.includeHuman) {
-                        attachHumanPlayer(competitionName, "Red", attempt, humanSeat, std::move(referencesAfterHuman));
+                        attachHumanPlayer(competitionName, "Hydrogen", attempt, humanSeat, std::move(referencesAfterHuman));
                         return;
                     }
                     setNewGameActionsEnabled(true);
                     statusBar()->showMessage("Created " + competitionName + " with "
-                        + QString::number(defaultTableSeats) + " reference players.");
+                        + QString::number(defaultTableSeats) + " reference players and "
+                        + QString::number(configuration.repetitions) + " game"
+                        + (configuration.repetitions == 1 ? QString{} : QStringLiteral("s")) + ".");
                     refreshCompetitions(competitionName);
                 });
         });
@@ -2332,6 +2367,7 @@ private:
     bool turnCanCheck_{};
     bool turnCanFold_{};
     bool presentFinalAutomatedActions_{};
+    int automatedRepetitionsRemaining_{};
     PauseReason pauseReason_{PauseReason::none};
     QTimer nextHandTimer_;
     QTimer nextDealCountdownTimer_;

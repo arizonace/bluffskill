@@ -192,8 +192,8 @@ std::string_view toString(Action action) noexcept {
 }
 
 Table::Table(std::string name, std::size_t maximumSeats, Chips startingStack, BlindSchedule blindSchedule,
-    ChipDenominations chipDenominations)
-    : name_(std::move(name)), maximumSeats_(maximumSeats), startingStack_(startingStack),
+    ChipDenominations chipDenominations, std::string gameName)
+    : name_(std::move(name)), gameName_(std::move(gameName)), maximumSeats_(maximumSeats), startingStack_(startingStack),
       chipDenominations_(normalizedChipDenominations(std::move(chipDenominations))), blindSchedule_(blindSchedule) {
     if (maximumSeats_ == 0 || startingStack_ <= 0) throw std::invalid_argument("table requires seats and a positive starting stack");
     if (!isChipValue(startingStack_)) {
@@ -382,7 +382,8 @@ void Table::startNextHand() {
     startHand();
 }
 
-void Table::restartGame() {
+void Table::restartGame(std::string gameName) {
+    if (!gameName.empty()) gameName_ = std::move(gameName);
     gameQuit_ = false;
     for (auto& seat : seats_) {
         seat.stack = startingStack_;
@@ -520,7 +521,7 @@ std::vector<PotView> Table::pots() const {
 }
 
 TableView Table::viewFor(std::string_view viewerName) const {
-    TableView view{.name = name_, .eventSequence = eventSequence_, .street = street_, .startingStack = startingStack_, .currentBet = currentBet_,
+    TableView view{.name = name_, .gameName = gameName_, .eventSequence = eventSequence_, .street = street_, .startingStack = startingStack_, .currentBet = currentBet_,
         .smallBlind = smallBlindAmount(), .bigBlind = bigBlindAmount(), .chipDenominations = chipDenominations_,
         .blindLevel = blindLevel_, .roundsPlayed = roundsPlayed_, .dealerSeat = dealerSeat_,
         .smallBlindSeat = smallBlindSeat_, .bigBlindSeat = bigBlindSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_,

@@ -6,6 +6,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QDoubleValidator>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -88,8 +89,8 @@ public:
         }
         layout->addRow("Player Clock (seconds)", playerClock_);
         layout->addRow("Deal Clock (seconds)", dealClock_);
-        layout->addRow("Uninterrupted Dealer Delay", uninterruptedDealerDelay_);
-        layout->addRow("Automated Player Delay", automatedPlayerDelay_);
+        layout->addRow("Uninterrupted Dealer Delay (fractional seconds)", uninterruptedDealerDelay_);
+        layout->addRow("Automated Player Delay (fractional seconds)", automatedPlayerDelay_);
         layout->addRow("Small Blind (number of smallest chip)", smallBlind_);
         layout->addRow("Blind Increase (hands)", blindHands_);
         layout->addRow("Blind Increase (minutes)", blindMinutes_);
@@ -122,24 +123,23 @@ public:
     }
 
 private:
-    static QDoubleSpinBox* delaySpinBox(int milliseconds, QWidget* parent) {
-        auto* control = new QDoubleSpinBox(parent);
-        control->setRange(0.001, 3'600.0);
-        control->setDecimals(3);
-        control->setSingleStep(0.100);
-        control->setSuffix(" seconds");
-        control->setValue(static_cast<double>(milliseconds) / 1'000.0);
+    static QLineEdit* delaySpinBox(int milliseconds, QWidget* parent) {
+        auto* control = new QLineEdit(parent);
+        control->setValidator(new QDoubleValidator(0.001, 3'600.0, 3, control));
+        control->setText(QString::number(static_cast<double>(milliseconds) / 1'000.0, 'g', 15));
         return control;
     }
 
-    static int milliseconds(const QDoubleSpinBox& control) {
-        return static_cast<int>(std::llround(control.value() * 1'000.0));
+    static int milliseconds(const QLineEdit& control) {
+        bool valid = false;
+        const auto seconds = control.text().toDouble(&valid);
+        return valid ? static_cast<int>(std::llround(seconds * 1'000.0)) : 1;
     }
 
     QSpinBox* playerClock_{};
     QSpinBox* dealClock_{};
-    QDoubleSpinBox* uninterruptedDealerDelay_{};
-    QDoubleSpinBox* automatedPlayerDelay_{};
+    QLineEdit* uninterruptedDealerDelay_{};
+    QLineEdit* automatedPlayerDelay_{};
     QSpinBox* smallBlind_{};
     QSpinBox* blindHands_{};
     QSpinBox* blindMinutes_{};
@@ -164,19 +164,21 @@ public:
         tree_ = new QTreeWidget(splitter);
         tree_->setHeaderLabels({"House / competition / table / player"});
         actionLog_ = new QTableWidget(splitter);
-        actionLog_->setColumnCount(11);
-        actionLog_->setHorizontalHeaderLabels({"Player", "Kind", "Street", "Round", "Action", "Value", "Stack", "Gain", "Pot", "Hand", "Hole"});
-        actionLog_->setMinimumWidth(1180);
+        actionLog_->setColumnCount(13);
+        actionLog_->setHorizontalHeaderLabels({"Timestamp", "Game", "Player", "Kind", "Street", "Round", "Action", "Value", "Stack", "Gain", "Pot", "Hand", "Hole"});
+        actionLog_->setMinimumWidth(1400);
         actionLog_->setColumnWidth(0, 150);
-        actionLog_->setColumnWidth(1, 90);
-        actionLog_->setColumnWidth(2, 90);
-        actionLog_->setColumnWidth(3, 70);
-        actionLog_->setColumnWidth(4, 110);
-        actionLog_->setColumnWidth(5, 100);
-        actionLog_->setColumnWidth(6, 100);
+        actionLog_->setColumnWidth(1, 220);
+        actionLog_->setColumnWidth(2, 150);
+        actionLog_->setColumnWidth(3, 90);
+        actionLog_->setColumnWidth(4, 90);
+        actionLog_->setColumnWidth(5, 70);
+        actionLog_->setColumnWidth(6, 110);
         actionLog_->setColumnWidth(7, 100);
         actionLog_->setColumnWidth(8, 100);
-        actionLog_->setColumnHidden(10, true);
+        actionLog_->setColumnWidth(9, 100);
+        actionLog_->setColumnWidth(10, 100);
+        actionLog_->setColumnHidden(12, true);
         actionLog_->horizontalHeader()->setStretchLastSection(true);
         actionLog_->verticalHeader()->setVisible(false);
         actionLog_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -298,6 +300,9 @@ public:
         actionLogCursors_[tableKey].sequence = afterQuit.eventSequence;
         refreshTree();
         activeActionLogTableKey_ = tableKey;
+        activeActionLogCompetitionName_ = competitionName;
+        activeActionLogTableName_ = tableName;
+        activeActionLogGameName_ = QString::fromStdString(afterQuit.gameName);
         const auto round = QString::number(afterQuit.roundsPlayed);
         const auto kindFor = [table](std::string_view name) { return actionLogPlayerKind(*table, name); };
         appendActionLogRow(playerName.isEmpty() ? "Dealer" : playerName,
@@ -414,19 +419,27 @@ private:
         const QString& hole = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
-        actionLog_->setItem(row, 0, new QTableWidgetItem(player));
-        actionLog_->setItem(row, 1, new QTableWidgetItem(kind));
-        actionLog_->setItem(row, 2, new QTableWidgetItem(street));
-        actionLog_->setItem(row, 3, new QTableWidgetItem(round));
-        actionLog_->setItem(row, 4, new QTableWidgetItem(action));
-        actionLog_->setItem(row, 5, new QTableWidgetItem(value));
-        actionLog_->setItem(row, 6, new QTableWidgetItem(stack));
-        actionLog_->setItem(row, 7, new QTableWidgetItem(gain));
-        actionLog_->setItem(row, 8, new QTableWidgetItem(pot));
-        actionLog_->setItem(row, 9, new QTableWidgetItem(hand));
-        actionLog_->setItem(row, 10, new QTableWidgetItem(hole));
-        actionLog_->item(row, 0)->setData(Qt::UserRole, activeActionLogTableKey_);
-        actionLog_->scrollToItem(actionLog_->item(row, 0), QAbstractItemView::PositionAtBottom);
+        const auto qualifiedGame = activeActionLogTableName_ == "Hydrogen"
+            ? activeActionLogCompetitionName_ + "::" + activeActionLogGameName_
+            : activeActionLogCompetitionName_ + ':' + activeActionLogTableName_ + ':' + activeActionLogGameName_;
+        actionLog_->setItem(row, 0, new QTableWidgetItem(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss")));
+        actionLog_->setItem(row, 1, new QTableWidgetItem(qualifiedGame));
+        actionLog_->setItem(row, 2, new QTableWidgetItem(player));
+        actionLog_->setItem(row, 3, new QTableWidgetItem(kind));
+        actionLog_->setItem(row, 4, new QTableWidgetItem(street));
+        actionLog_->setItem(row, 5, new QTableWidgetItem(round));
+        actionLog_->setItem(row, 6, new QTableWidgetItem(action));
+        actionLog_->setItem(row, 7, new QTableWidgetItem(value));
+        actionLog_->setItem(row, 8, new QTableWidgetItem(stack));
+        actionLog_->setItem(row, 9, new QTableWidgetItem(gain));
+        actionLog_->setItem(row, 10, new QTableWidgetItem(pot));
+        actionLog_->setItem(row, 11, new QTableWidgetItem(hand));
+        actionLog_->setItem(row, 12, new QTableWidgetItem(hole));
+        actionLog_->item(row, 2)->setData(Qt::UserRole, activeActionLogTableKey_);
+        actionLog_->item(row, 2)->setData(Qt::UserRole + 1, activeActionLogCompetitionName_);
+        actionLog_->item(row, 2)->setData(Qt::UserRole + 2, activeActionLogTableName_);
+        actionLog_->item(row, 2)->setData(Qt::UserRole + 3, activeActionLogGameName_);
+        actionLog_->scrollToItem(actionLog_->item(row, 2), QAbstractItemView::PositionAtBottom);
     }
 
     [[nodiscard]] static QString pokerNotation(bluffskill::cards::Card card) {
@@ -526,30 +539,50 @@ private:
         settings.setValue("server/lastExportDirectory", QFileInfo(path).absolutePath());
     }
 
-    [[nodiscard]] QJsonArray actionLogJson(const QString& tableKey = {}) const {
-        QJsonArray actions;
-        int serializedIndex = 1;
-        for (int row = 0; row < actionLog_->rowCount(); ++row) {
-            const auto* player = actionLog_->item(row, 0);
-            if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
-            actions.append(QJsonObject{{"index", serializedIndex++}, {"player", player->text()},
-                {"kind", actionLog_->item(row, 1)->text()},
-                {"street", actionLog_->item(row, 2)->text()},
-                {"round", actionLog_->item(row, 3)->text()},
-                {"action", actionLog_->item(row, 4)->text()},
-                {"value", actionLog_->item(row, 5)->text()},
-                {"stack", actionLog_->item(row, 6)->text()},
-                {"gain", actionLog_->item(row, 7)->text()},
-                {"pot", actionLog_->item(row, 8)->text()},
-                {"hand", actionLog_->item(row, 9)->text()},
-                {"holeCards", actionLog_->item(row, 10)->text()}});
+    [[nodiscard]] QJsonObject actionLogRecord(int row, int index) const {
+        return {{"index", index}, {"timestamp", actionLog_->item(row, 0)->text()},
+            {"player", actionLog_->item(row, 2)->text()}, {"kind", actionLog_->item(row, 3)->text()},
+            {"street", actionLog_->item(row, 4)->text()}, {"round", actionLog_->item(row, 5)->text()},
+            {"action", actionLog_->item(row, 6)->text()}, {"value", actionLog_->item(row, 7)->text()},
+            {"stack", actionLog_->item(row, 8)->text()}, {"gain", actionLog_->item(row, 9)->text()},
+            {"pot", actionLog_->item(row, 10)->text()}, {"hand", actionLog_->item(row, 11)->text()},
+            {"holeCards", actionLog_->item(row, 12)->text()}};
+    }
+
+    [[nodiscard]] QJsonArray actionLogJson() const {
+        QJsonArray competitions;
+        for (const auto& competition : house_.competitions()) {
+            const auto competitionName = QString::fromStdString(competition.name);
+            QJsonArray games;
+            QSet<QString> seenGames;
+            for (int row = 0; row < actionLog_->rowCount(); ++row) {
+                const auto* player = actionLog_->item(row, 2);
+                if (player == nullptr || player->data(Qt::UserRole + 1).toString() != competitionName) continue;
+                const auto gameName = player->data(Qt::UserRole + 3).toString();
+                const auto tableName = player->data(Qt::UserRole + 2).toString();
+                const auto gameKey = tableName + '\x1f' + gameName;
+                if (seenGames.contains(gameKey)) continue;
+                seenGames.insert(gameKey);
+                QJsonArray actions;
+                int index = 1;
+                for (int gameRow = 0; gameRow < actionLog_->rowCount(); ++gameRow) {
+                    const auto* gamePlayer = actionLog_->item(gameRow, 2);
+                    if (gamePlayer == nullptr || gamePlayer->data(Qt::UserRole + 1).toString() != competitionName
+                        || gamePlayer->data(Qt::UserRole + 2).toString() != tableName
+                        || gamePlayer->data(Qt::UserRole + 3).toString() != gameName) continue;
+                    actions.append(actionLogRecord(gameRow, index++));
+                }
+                games.append(QJsonObject{{"name", gameName}, {"table", tableName}, {"actions", actions}});
+            }
+            if (!games.isEmpty()) competitions.append(QJsonObject{{"name", competitionName}, {"games", games}});
         }
-        return actions;
+        return competitions;
     }
 
     [[nodiscard]] QJsonArray playersJson() const {
-        QJsonArray players;
+        QJsonArray competitions;
         for (const auto& competition : house_.competitions()) {
+            QJsonArray players;
             for (const auto& table : competition.tables) {
                 const auto tableView = house_.tableView(competition.name, table.name);
                 for (const auto& player : tableView.players) {
@@ -561,15 +594,15 @@ private:
                             profile.insert(QString::fromStdString(parameter.name), parameter.value);
                         }
                     }
-                    players.append(QJsonObject{{"competition", QString::fromStdString(competition.name)},
-                        {"table", QString::fromStdString(table.name)}, {"name", QString::fromStdString(player.name)},
+                    players.append(QJsonObject{{"table", QString::fromStdString(table.name)}, {"name", QString::fromStdString(player.name)},
                         {"kind", QString::fromUtf8(bluffskill::poker::toString(player.kind))}, {"seat", static_cast<int>(player.seat)},
                         {"stack", static_cast<qint64>(player.stack)}, {"committed", static_cast<qint64>(player.committed)},
                         {"folded", player.folded}, {"type", type}, {"profile", profile}});
                 }
             }
+            competitions.append(QJsonObject{{"name", QString::fromStdString(competition.name)}, {"players", players}});
         }
-        return players;
+        return competitions;
     }
 
     bool writeFile(const QString& path, const QByteArray& contents, const QString& description) {
@@ -589,10 +622,10 @@ private:
     }
 
     bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
-        QString csv = "Index,Player,Kind,Street,Round,Action,Value,Stack,Gain,Pot,Hand,Hole\n";
+        QString csv = "Index,Timestamp,Game,Player,Kind,Street,Round,Action,Value,Stack,Gain,Pot,Hand,Hole\n";
         int serializedIndex = 1;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
-            const auto* player = actionLog_->item(row, 0);
+            const auto* player = actionLog_->item(row, 2);
             if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
             csv += QString::number(serializedIndex++);
             for (int column = 0; column < actionLog_->columnCount(); ++column) {
@@ -606,7 +639,7 @@ private:
     }
 
     bool saveActionLogJson(const QString& path) {
-        const QJsonObject exportData{{"actionLog", actionLogJson()}, {"players", playersJson()}};
+        const QJsonObject exportData{{"competitions", actionLogJson()}, {"players", playersJson()}};
         return writeFile(withSuffix(path, "json"), QJsonDocument(exportData).toJson(QJsonDocument::Indented), "Action Log JSON");
     }
 
@@ -734,6 +767,9 @@ private:
                 for (const auto& action : view.actionHistory) history.append(actionFingerprint(action));
                 const auto tableKey = QString::fromStdString(competition.name) + '/' + QString::fromStdString(table.name);
                 activeActionLogTableKey_ = tableKey;
+                activeActionLogCompetitionName_ = QString::fromStdString(competition.name);
+                activeActionLogTableName_ = QString::fromStdString(table.name);
+                activeActionLogGameName_ = QString::fromStdString(view.gameName);
                 auto& cursor = actionLogCursors_[tableKey];
                 const auto continues = cursor.history.size() <= history.size()
                     && std::equal(cursor.history.cbegin(), cursor.history.cend(), history.cbegin());
@@ -868,6 +904,9 @@ private:
     QDate serverLogDate_;
     QHash<QString, ActionLogCursor> actionLogCursors_;
     QString activeActionLogTableKey_;
+    QString activeActionLogCompetitionName_;
+    QString activeActionLogTableName_;
+    QString activeActionLogGameName_;
 };
 
 QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competition) {
@@ -888,6 +927,7 @@ QJsonObject competitionJson(const bluffskill::poker::CompetitionSummary& competi
     return {{"name", QString::fromStdString(competition.name)},
             {"style", "Tournament"},
             {"table", QString::fromStdString(competition.tables.front().name)},
+            {"game", QString::fromStdString(competition.tables.front().gameName)},
             {"maximumPlayers", static_cast<int>(competition.tournament.maximumPlayers)},
             {"startingStack", static_cast<int>(competition.tournament.startingStack)},
             {"chipDenominations", chipDenominations},
@@ -906,6 +946,7 @@ QJsonObject tableJson(const bluffskill::poker::TableSummary& table) {
         players.append(player);
     }
     return {{"name", QString::fromStdString(table.name)},
+            {"game", QString::fromStdString(table.gameName)},
             {"maximumSeats", static_cast<int>(table.maximumSeats)},
             {"players", players}};
 }
@@ -956,7 +997,8 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
             {"callAmount", static_cast<qint64>(legal.callAmount)}, {"minimumAmount", static_cast<qint64>(legal.minimumAmount)},
             {"maximumAmount", static_cast<qint64>(legal.maximumAmount)}};
     }
-    return {{"name", QString::fromStdString(table.name)}, {"sequence", static_cast<qint64>(table.eventSequence)},
+    return {{"name", QString::fromStdString(table.name)}, {"game", QString::fromStdString(table.gameName)},
+        {"sequence", static_cast<qint64>(table.eventSequence)},
         {"street", QString::fromUtf8(bluffskill::poker::toString(table.street))},
         {"startingStack", static_cast<qint64>(table.startingStack)}, {"currentBet", static_cast<qint64>(table.currentBet)},
         {"smallBlind", static_cast<qint64>(table.smallBlind)}, {"bigBlind", static_cast<qint64>(table.bigBlind)},

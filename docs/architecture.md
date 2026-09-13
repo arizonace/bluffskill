@@ -48,4 +48,4 @@ The engine produces a `TableView` for each viewer rather than exposing domain ob
 
 REST is the initial command/query API. GraphQL should be a second adapter over the same application services, not a replacement engine. Notifications should begin as server-sent events; WebSockets can be added when bidirectional low-latency interactions demonstrably need them.
 
-The current server is deliberately a small vertical scaffold: `GET /v1/health` and `POST /v1/competitions`. Its routing and server console establish the adapter boundary, not the final protocol.
+The current server implements the single-table command/query slice: health, competition and table discovery, reference/API-player seating, viewer-projected table reads, actions, next hand, restart, and quit. A restart creates the next color-named game within the same element-named table; notifications and persistence remain follow-up work. Its routing and server console establish the adapter boundary, not the final protocol.

@@ -109,6 +109,7 @@ struct ActionView {
 
 struct TableView {
     std::string name;
+    std::string gameName;
     std::uint64_t eventSequence{0};
     Street street{Street::waiting};
     Chips startingStack{0};
@@ -138,13 +139,14 @@ struct TableView {
 class Table {
 public:
     Table(std::string name, std::size_t maximumSeats, Chips startingStack, BlindSchedule blindSchedule = {},
-        ChipDenominations chipDenominations = defaultChipDenominations());
+        ChipDenominations chipDenominations = defaultChipDenominations(), std::string gameName = {});
     ~Table();
 
     void seatPlayer(std::string name, PlayerKind kind, std::size_t seat, Chips stack);
     void startHand();
     void startNextHand();
-    void restartGame();
+    // The House supplies the next per-competition game name on restart.
+    void restartGame(std::string gameName = {});
     [[nodiscard]] TableWinner quitGame();
     [[nodiscard]] bool isGameInProgress() const;
     void setBlindSchedule(BlindSchedule blindSchedule);
@@ -181,6 +183,7 @@ private:
     [[nodiscard]] bool hasSingleLiveSeat() const;
 
     std::string name_;
+    std::string gameName_;
     std::size_t maximumSeats_{0};
     Chips startingStack_{0};
     ChipDenominations chipDenominations_;
