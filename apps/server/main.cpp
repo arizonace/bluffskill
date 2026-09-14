@@ -62,7 +62,7 @@ bluffskill::poker::BlindSchedule pokerBlindSchedule(const bluffskill::app_config
     return {
         .handsPerLevel = static_cast<std::size_t>(settings.blindHandsPerLevel),
         .minutesPerLevel = std::chrono::minutes{settings.blindMinutesPerLevel},
-        .smallBlind = static_cast<bluffskill::poker::Chips>(settings.chipDenominations.front()) * settings.smallBlind,
+        .smallBlind = settings.smallBlind,
     };
 }
 
@@ -76,33 +76,24 @@ public:
         auto* tabs = new QTabWidget(this);
         auto* general = new QWidget(tabs);
         auto* layout = new QFormLayout(general);
-        playerClock_ = new QSpinBox(this); playerClock_->setRange(5, 3600); playerClock_->setValue(settings.playerClockSeconds);
-        dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
-        uninterruptedDealerDelay_ = delaySpinBox(settings.uninterruptedDealerDelayMilliseconds, this);
-        automatedPlayerDelay_ = delaySpinBox(settings.automatedPlayerDelayMilliseconds, this);
-        smallBlind_ = new QSpinBox(this); smallBlind_->setRange(1, 1'000'000); smallBlind_->setValue(settings.smallBlind);
-        smallBlind_->setToolTip("Number of smallest chip.");
+        smallBlind_ = new QLineEdit(QString::number(settings.smallBlind), this);
+        stack_ = new QLineEdit(QString::number(settings.stack), this);
         blindHands_ = new QSpinBox(this); blindHands_->setRange(1, 10000); blindHands_->setValue(settings.blindHandsPerLevel);
         blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
-        autoConnect_ = new QCheckBox("Automatically try preferred localhost ports", this); autoConnect_->setChecked(settings.clientAutoConnect);
         detailedServerLogs_ = new QCheckBox("Include JSON request and response bodies in the local server log", this);
         detailedServerLogs_->setChecked(settings.detailedServerLogs);
         for (int index = 0; index < 3; ++index) {
             ports_[index] = new QSpinBox(this); ports_[index]->setRange(1, 65535); ports_[index]->setValue(settings.serverPreferredPorts.value(index));
         }
-        layout->addRow("Player Clock (seconds)", playerClock_);
-        layout->addRow("Deal Clock (seconds)", dealClock_);
-        layout->addRow("Uninterrupted Dealer Delay (fractional seconds)", uninterruptedDealerDelay_);
-        layout->addRow("Automated Player Delay (fractional seconds)", automatedPlayerDelay_);
-        layout->addRow("Small Blind (number of smallest chip)", smallBlind_);
+        layout->addRow("Small Blind", smallBlind_);
+        layout->addRow("Stack", stack_);
         layout->addRow("Blind Increase (hands)", blindHands_);
         layout->addRow("Blind Increase (minutes)", blindMinutes_);
         layout->addRow("Default Player Name", defaultPlayerName_);
         layout->addRow("Preferred Port 1", ports_[0]);
         layout->addRow("Preferred Port 2", ports_[1]);
         layout->addRow("Preferred Port 3", ports_[2]);
-        layout->addRow("Client AutoConnect", autoConnect_);
         layout->addRow("Detailed Server Logs", detailedServerLogs_);
         tabs->addTab(general, "General");
 
@@ -118,21 +109,31 @@ public:
         tabs->addTab(columns, "Action Log Columns");
         root->addWidget(tabs);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Save, this);
-        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::accepted, this, [this, settings] {
+            bool smallBlindValid = false;
+            bool stackValid = false;
+            const auto smallBlind = smallBlind_->text().toLongLong(&smallBlindValid);
+            const auto stack = stack_->text().toLongLong(&stackValid);
+            const auto smallestChip = settings.chipDenominations.front();
+            if (!smallBlindValid || !stackValid || smallBlind <= 0 || stack <= 0
+                || smallBlind % smallestChip != 0 || stack % smallestChip != 0) {
+                QMessageBox::warning(this, "Invalid chip amounts",
+                    "Small Blind and Stack must be positive integer multiples of the smallest chip denomination ("
+                        + QLocale().toString(smallestChip) + ").");
+                return;
+            }
+            accept();
+        });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         root->addWidget(buttons);
     }
 
     [[nodiscard]] bluffskill::app_config::Settings settings(bluffskill::app_config::Settings value) const {
-        value.playerClockSeconds = playerClock_->value();
-        value.dealClockSeconds = dealClock_->value();
-        value.uninterruptedDealerDelayMilliseconds = milliseconds(*uninterruptedDealerDelay_);
-        value.automatedPlayerDelayMilliseconds = milliseconds(*automatedPlayerDelay_);
-        value.smallBlind = smallBlind_->value();
+        value.smallBlind = smallBlind_->text().toLongLong();
+        value.stack = stack_->text().toLongLong();
         value.blindHandsPerLevel = blindHands_->value();
         value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
-        value.clientAutoConnect = autoConnect_->isChecked();
         value.detailedServerLogs = detailedServerLogs_->isChecked();
         value.serverActionLogVisibleColumns.clear();
         for (const auto* column : optionalActionLogColumns_) {
@@ -147,28 +148,11 @@ public:
 private:
     static constexpr std::array<const char*, 9> optionalActionLogColumns_{
         "Timestamp", "Game", "Round", "Street", "Kind", "Stack", "Gain", "Pot", "Hand"};
-    static QLineEdit* delaySpinBox(int milliseconds, QWidget* parent) {
-        auto* control = new QLineEdit(parent);
-        control->setValidator(new QDoubleValidator(0.001, 3'600.0, 3, control));
-        control->setText(QString::number(static_cast<double>(milliseconds) / 1'000.0, 'g', 15));
-        return control;
-    }
-
-    static int milliseconds(const QLineEdit& control) {
-        bool valid = false;
-        const auto seconds = control.text().toDouble(&valid);
-        return valid ? static_cast<int>(std::llround(seconds * 1'000.0)) : 1;
-    }
-
-    QSpinBox* playerClock_{};
-    QSpinBox* dealClock_{};
-    QLineEdit* uninterruptedDealerDelay_{};
-    QLineEdit* automatedPlayerDelay_{};
-    QSpinBox* smallBlind_{};
+    QLineEdit* smallBlind_{};
+    QLineEdit* stack_{};
     QSpinBox* blindHands_{};
     QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
-    QCheckBox* autoConnect_{};
     QCheckBox* detailedServerLogs_{};
     QHash<QString, QCheckBox*> actionLogColumns_;
     std::array<QSpinBox*, 3> ports_{};
@@ -320,6 +304,25 @@ public:
 
     bluffskill::poker::House& house() noexcept { return house_; }
 
+    [[nodiscard]] bluffskill::poker::CompetitionSummary createCompetition(std::size_t maximumPlayers) {
+        auto competitionSettings = settings_;
+        const auto smallestChip = competitionSettings.chipDenominations.front();
+        const auto amountsAreValid = competitionSettings.smallBlind > 0 && competitionSettings.stack > 0
+            && competitionSettings.smallBlind % smallestChip == 0 && competitionSettings.stack % smallestChip == 0;
+        if (!amountsAreValid) {
+            competitionSettings.smallBlind = smallestChip;
+            competitionSettings.stack = smallestChip * 300;
+            log("Error: [chips] smallBlind and stack must be positive multiples of the smallest denomination; "
+                "using smallBlind=" + QString::number(competitionSettings.smallBlind)
+                + " and stack=" + QString::number(competitionSettings.stack) + " for this competition.");
+        }
+        house_.setDefaultCompetitionSettings(pokerBlindSchedule(competitionSettings), pokerChipDenominations(competitionSettings));
+        return house_.createSingleTableTournament({
+            .maximumPlayers = maximumPlayers,
+            .startingStack = competitionSettings.stack,
+        });
+    }
+
     [[nodiscard]] bluffskill::poker::TableWinner quitGame(const QString& competitionName, const QString& tableName, const QString& playerName) {
         const auto competition = house_.competition(competitionName.toStdString());
         if (!competition) throw std::invalid_argument("competition was not found");
@@ -412,10 +415,9 @@ private:
         if (dialog.exec() != QDialog::Accepted) return;
         settings_ = dialog.settings(settings_);
         bluffskill::app_config::AppConfig::save(settings_);
-        house_.setBlindSchedule(pokerBlindSchedule(settings_));
         applyActionLogColumnVisibility();
         QMessageBox::information(this, "Settings saved",
-            "Server and client settings now have separate controls in their shared file. Blind settings apply to new hands; preferred ports are used the next time the server starts.");
+            "Server and client settings have separate controls in their shared file. Small Blind and Stack apply when the next competition starts; existing competitions are unchanged.");
     }
 
     void showAbout() {
@@ -1205,10 +1207,7 @@ int main(int argc, char* argv[]) {
             window.logRequestJson(request);
             const auto json = QJsonDocument::fromJson(request.body()).object();
             try {
-                const auto competition = window.house().createSingleTableTournament({
-                    .maximumPlayers = static_cast<std::size_t>(json.value("maximumPlayers").toInt(10)),
-                    .startingStack = static_cast<unsigned int>(json.value("startingStack").toInt(7000)),
-                });
+                const auto competition = window.createCompetition(static_cast<std::size_t>(json.value("maximumPlayers").toInt(10)));
                 window.refreshTree();
                 return window.jsonResponse("POST /v1/competitions → 201 (" + QString::fromStdString(competition.name) + ')',
                     competitionJson(competition), QHttpServerResponder::StatusCode::Created);

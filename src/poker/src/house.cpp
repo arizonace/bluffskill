@@ -170,7 +170,7 @@ CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
     if (spec.maximumPlayers == 0 || spec.maximumPlayers > 10) {
         throw std::invalid_argument("maximumPlayers must be between 1 and 10");
     }
-    if (spec.startingStack == 0) throw std::invalid_argument("startingStack must be positive");
+    if (spec.startingStack <= 0) throw std::invalid_argument("startingStack must be positive");
 
     CompetitionSummary summary{
         .name = nextCompetitionName(),
@@ -181,7 +181,7 @@ CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
     };
     Competition competition{.summary = std::move(summary)};
     competition.tables.push_back(std::make_unique<Table>(competition.summary.tables.front().name,
-        competition.summary.tables.front().maximumSeats, static_cast<Chips>(spec.startingStack), blindSchedule_, chipDenominations_,
+        competition.summary.tables.front().maximumSeats, spec.startingStack, blindSchedule_, chipDenominations_,
         competition.summary.tables.front().gameName));
     competitions_.push_back(std::move(competition));
     return summaryOf(competitions_.back());
@@ -286,7 +286,7 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
             .seat = *seat,
         });
         competition.tables.at(tableIndex - 1)->seatPlayer(playerName, PlayerKind::reference, *seat,
-            static_cast<Chips>(competition.summary.tournament.startingStack));
+            competition.summary.tournament.startingStack);
         startTableIfReady(competition, tableIndex - 1);
     }
     return summaryOf(competition);
@@ -306,7 +306,7 @@ CompetitionSummary House::createApiPlayer(std::string_view competitionName, std:
     });
     const auto& player = competition.players.back();
     auto& table = *competition.tables.at(tableIndex);
-    table.seatPlayer(player.player->name(), player.player->kind(), *seat, static_cast<Chips>(competition.summary.tournament.startingStack));
+    table.seatPlayer(player.player->name(), player.player->kind(), *seat, competition.summary.tournament.startingStack);
     startTableIfReady(competition, tableIndex);
     return summaryOf(competition);
 }
@@ -453,6 +453,11 @@ void House::setBlindSchedule(BlindSchedule blindSchedule) {
         for (auto& table : competition.tables) table->setBlindSchedule(blindSchedule);
     }
     blindSchedule_ = blindSchedule;
+}
+
+void House::setDefaultCompetitionSettings(BlindSchedule blindSchedule, ChipDenominations chipDenominations) {
+    blindSchedule_ = blindSchedule;
+    chipDenominations_ = normalizedChipDenominations(std::move(chipDenominations));
 }
 
 void House::advanceReferencePlayers(Competition& competition, std::size_t tableIndex) {

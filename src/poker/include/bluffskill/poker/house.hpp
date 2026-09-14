@@ -18,7 +18,7 @@ enum class CompetitionStyle { tournament, cash };
 
 struct TournamentSpec {
     std::size_t maximumPlayers{10};
-    unsigned int startingStack{7000};
+    Chips startingStack{7'500};
 };
 
 struct TableSummary {
@@ -72,6 +72,9 @@ public:
     void restartTable(std::string_view competitionName, std::string_view tableName);
     [[nodiscard]] TableWinner quitGame(std::string_view competitionName, std::string_view tableName);
     void setBlindSchedule(BlindSchedule blindSchedule);
+    // Applied only to competitions created after this call; existing tables
+    // retain their chips and blind schedule.
+    void setDefaultCompetitionSettings(BlindSchedule blindSchedule, ChipDenominations chipDenominations);
     void pauseTable(std::string_view competitionName, std::string_view tableName);
     void resumeTable(std::string_view competitionName, std::string_view tableName);
 

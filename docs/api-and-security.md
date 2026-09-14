@@ -29,7 +29,7 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 Creation request example:
 
 ```json
-{ "flavor": "NoLimitTexasHoldEm", "maximumPlayers": 10, "startingStack": 7000 }
+{ "flavor": "NoLimitTexasHoldEm", "maximumPlayers": 10 }
 ```
 
 For a locally running server at port `53153`, these commands list competitions, create one, then add nine reference players. `POST /v1/competitions` creates; it never lists. A table begins its first hand when all of its seats are occupied, allowing a client to place its API player between two reference-player creation groups.
@@ -38,7 +38,7 @@ For a locally running server at port `53153`, these commands list competitions, 
 curl http://127.0.0.1:53153/v1/competitions
 curl --request POST http://127.0.0.1:53153/v1/competitions \
   --header 'Content-Type: application/json' \
-  --data '{"flavor":"NoLimitTexasHoldEm","maximumPlayers":10,"startingStack":7000}'
+  --data '{"flavor":"NoLimitTexasHoldEm","maximumPlayers":10}'
 curl --request POST http://127.0.0.1:53153/v1/competitions/Valhalla/reference-players \
   --header 'Content-Type: application/json' \
   --data '{"count":5,"type":"Leo"}'
@@ -53,7 +53,7 @@ Action request example:
 { "player": "Arizona", "action": "raise", "amount": 500, "expectedSequence": 41 }
 ```
 
-The creation/list response includes `chipDenominations`, the positive, sorted denomination list active for that competition. Every denomination after the first is an integer multiple of the preceding one. Each table-view response repeats the same list so a client can render its wager controls from the authoritative table state. The server gets the list from its shared configuration when the competition is created; the client must not use a local configuration value for it.
+The creation/list response includes `chipDenominations`, the positive, sorted denomination list active for that competition. Every denomination after the first is an integer multiple of the preceding one. Each table-view response repeats the same list so a client can render its wager controls from the authoritative table state. The server gets the list, starting stack, and small blind from its shared configuration when the competition is created; client-provided stack values are ignored. [chips] `smallBlind` and `stack` must be positive multiples of the smallest denomination. If either is invalid, the server logs an error and starts that competition with the smallest denomination as its small blind and 300 small blinds as its stack.
 
 The action request also carries the API-player name in this unauthenticated scaffold. `amount` is an integer chip amount and, for a bet or raise, is the player's **total commitment in the current betting round**, not an additional increment. Check, call, and fold use `0`. Bet and raise totals must be multiples of the competition's smallest `chipDenominations` value. A real authenticated adapter derives the player identity from its credential rather than accepting that field from the request body.
 

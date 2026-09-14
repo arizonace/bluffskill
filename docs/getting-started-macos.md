@@ -27,7 +27,7 @@ Run either application from `build/apps/server/` or `build/apps/client/`. The se
 
 ## Chip denominations
 
-The shared configuration file is `~/.config/azonelayer/blindskill/blindskill.conf`. The server creates it with the default `[chips]` `denominations=25, 100, 500, 1000` and `[blinds]` `smallBlind=1` (Number of smallest chip). Change the comma-separated denominations or the small-blind multiplier before starting the server to create competitions with different chip values. Values must be positive, each value must be an integer multiple of the preceding smaller value, and the smallest value must divide the starting stack. The big blind is twice the small blind. The client always obtains the active list from the selected competition/table response instead of using its local configuration.
+The shared configuration file is `~/.config/azonelayer/blindskill/blindskill.conf`. The server creates it with [chips] `denominations=25, 100, 500, 1000`, `smallBlind=25`, and `stack=7500`. Change these amounts before creating a competition to use different chip values. Small Blind and Stack must be positive integer multiples of the smallest chip denomination. If either is invalid when a competition starts, the server logs an error and uses the smallest denomination as the blind and a stack of 300 blinds for that competition. The big blind is twice the small blind. The client always obtains active chip values from the selected competition/table response instead of using its local configuration.
 
 ## Local macOS app bundles
 

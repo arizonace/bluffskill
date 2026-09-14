@@ -97,6 +97,14 @@ int main() {
     const auto customChipsCompetition = customChipsHouse.createSingleTableTournament({.maximumPlayers = 2, .startingStack = 7'000});
     assert((customChipsCompetition.chipDenominations == bluffskill::poker::ChipDenominations{50, 200, 1'000}));
 
+    bluffskill::poker::House futureSettingsHouse;
+    futureSettingsHouse.setDefaultCompetitionSettings({.smallBlind = 50}, {50, 200, 1'000});
+    const auto futureSettingsCompetition = futureSettingsHouse.createSingleTableTournament({.maximumPlayers = 2, .startingStack = 15'000});
+    const auto futureSettingsView = futureSettingsHouse.tableView(futureSettingsCompetition.name, "Hydrogen");
+    assert(futureSettingsView.smallBlind == 50);
+    assert(futureSettingsView.startingStack == 15'000);
+    assert((futureSettingsView.chipDenominations == bluffskill::poker::ChipDenominations{50, 200, 1'000}));
+
     bluffskill::poker::House clearableHouse;
     const auto clearableCompetition = clearableHouse.createSingleTableTournament({.maximumPlayers = 3, .startingStack = 7'000});
     [[maybe_unused]] const auto firstPlayer = clearableHouse.createApiPlayer(clearableCompetition.name, "Hydrogen", "One");

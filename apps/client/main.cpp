@@ -655,8 +655,6 @@ public:
         dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
         uninterruptedDealerDelay_ = delaySpinBox(settings.uninterruptedDealerDelayMilliseconds, this);
         automatedPlayerDelay_ = delaySpinBox(settings.automatedPlayerDelayMilliseconds, this);
-        smallBlind_ = new QSpinBox(this); smallBlind_->setRange(1, 1'000'000); smallBlind_->setValue(settings.smallBlind);
-        smallBlind_->setToolTip("Number of smallest chip.");
         blindHands_ = new QSpinBox(this); blindHands_->setRange(1, 10000); blindHands_->setValue(settings.blindHandsPerLevel);
         blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
@@ -669,7 +667,6 @@ public:
         layout->addRow("Deal Clock (seconds)", dealClock_);
         layout->addRow("Uninterrupted Dealer Delay (fractional seconds)", uninterruptedDealerDelay_);
         layout->addRow("Automated Player Delay (fractional seconds)", automatedPlayerDelay_);
-        layout->addRow("Small Blind (number of smallest chip)", smallBlind_);
         layout->addRow("Blind Increase (hands)", blindHands_);
         layout->addRow("Blind Increase (minutes)", blindMinutes_);
         layout->addRow("Default Player Name", defaultPlayerName_);
@@ -689,7 +686,6 @@ public:
         value.dealClockSeconds = dealClock_->value();
         value.uninterruptedDealerDelayMilliseconds = milliseconds(*uninterruptedDealerDelay_);
         value.automatedPlayerDelayMilliseconds = milliseconds(*automatedPlayerDelay_);
-        value.smallBlind = smallBlind_->value();
         value.blindHandsPerLevel = blindHands_->value();
         value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
@@ -718,7 +714,6 @@ private:
     QSpinBox* dealClock_{};
     QLineEdit* uninterruptedDealerDelay_{};
     QLineEdit* automatedPlayerDelay_{};
-    QSpinBox* smallBlind_{};
     QSpinBox* blindHands_{};
     QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
@@ -2238,7 +2233,6 @@ private:
         auto* reply = postJson("/v1/competitions", QJsonObject{
             {"flavor", "NoLimitTexasHoldEm"},
             {"maximumPlayers", defaultTableSeats},
-            {"startingStack", 7000},
         });
         connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, humanSeat,
             referencesBeforeHuman = std::move(referencesBeforeHuman), referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
@@ -2290,7 +2284,6 @@ private:
         auto* reply = postJson("/v1/competitions", QJsonObject{
             {"flavor", "NoLimitTexasHoldEm"},
             {"maximumPlayers", defaultTableSeats},
-            {"startingStack", 7000},
         });
         connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, configuration, humanSeat,
             referencesBeforeHuman = std::move(referencesBeforeHuman), referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {

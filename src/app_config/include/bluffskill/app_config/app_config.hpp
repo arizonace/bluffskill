@@ -21,7 +21,8 @@ struct Settings {
     int dealClockSeconds{20};
     int uninterruptedDealerDelayMilliseconds{5'000};
     int automatedPlayerDelayMilliseconds{1'000};
-    int smallBlind{1}; // Number of smallest chip.
+    qint64 smallBlind{25};
+    qint64 stack{7'500};
     int blindHandsPerLevel{16};
     int blindMinutesPerLevel{20};
     QList<qint64> chipDenominations;
