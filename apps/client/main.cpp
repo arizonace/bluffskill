@@ -533,16 +533,16 @@ private:
     }
 
     static void drawResultBox(QPainter& painter, QPointF center, qint64 winnings, qint64 net, bool folded) {
-        if (net == 0) return;
+        if (winnings == 0 && net == 0) return;
         const QRectF rect(center.x() - 35, center.y() - 20, 70, 40);
         painter.save();
-        const auto won = net > 0;
+        const auto won = winnings > 0;
         painter.setPen(QPen(won ? QColor("#4C3B00") : folded ? QColor("#8A3C4A") : QColor("#5B1717"), 1));
         painter.setBrush(won ? QColor("#F5E400") : folded ? QColor("#F2B8C1") : QColor("#E55A5A"));
         painter.drawRoundedRect(rect, 14, 14);
         painter.setPen(QColor("#171717"));
         painter.setFont(QFont("Helvetica", 10, QFont::Bold));
-        const auto text = won ? chips(winnings) + '\n' + "+" + chips(net)
+        const auto text = won ? chips(winnings) + '\n' + (net >= 0 ? "+" : "-") + chips(std::abs(net))
             : "Lost\n-" + chips(-net);
         painter.drawText(rect.adjusted(3, 2, -3, -2), Qt::AlignCenter | Qt::TextWordWrap, text);
         painter.restore();
@@ -862,7 +862,7 @@ public:
 
     [[nodiscard]] CustomGameConfiguration configuration() const {
         CustomGameConfiguration configuration{.includeHuman = includeHuman_->isChecked(),
-            .humanRecordsHoleCards = recordHoleCards_->isChecked(), .repetitions = repetitions_->value(),
+            .humanRecordsHoleCards = recordHoleCards_->isChecked(), .repetitions = includeHuman_->isChecked() ? 1 : repetitions_->value(),
             .playerName = playerName_->text().trimmed()};
         for (const auto& player : referencePlayers_) {
             configuration.referencePlayers.append({.type = player.type, .count = player.count->value()});
@@ -874,6 +874,7 @@ private:
     void updateState() {
         playerName_->setEnabled(includeHuman_->isChecked());
         recordHoleCards_->setEnabled(includeHuman_->isChecked());
+        repetitions_->setEnabled(!includeHuman_->isChecked());
         auto total = includeHuman_->isChecked() ? 1 : 0;
         for (const auto& player : referencePlayers_) total += player.count->value();
         const auto valid = total == defaultTableSeats && (!includeHuman_->isChecked() || !playerName_->text().trimmed().isEmpty());
@@ -1028,14 +1029,31 @@ public:
         }
         actionLayout->addLayout(actionControlsLayout);
         auto* wagerLayout = new QHBoxLayout;
-        wagerLayout->addWidget(new QLabel("Bet Amount", actions));
+        auto* amountColumn = new QVBoxLayout;
+        amountColumn->setContentsMargins(0, 0, 0, 0);
+        auto* amountRow = new QHBoxLayout;
+        amountRow->setContentsMargins(0, 0, 0, 0);
+        amountRow->addWidget(new QLabel("Bet Amount", actions));
         amountEdit_ = new QLineEdit(actions);
         amountEdit_->setValidator(new QIntValidator(0, 1000000000, amountEdit_));
         amountEdit_->setEnabled(false);
         amountEdit_->setMinimumWidth(115);
         connect(amountEdit_, &QLineEdit::editingFinished, this, [this] { normalizeWagerAmount(); });
         connect(amountEdit_, &QLineEdit::textChanged, this, [this] { updateWagerSummary(wagerRaiseAvailable_, wagerCurrentBet_); });
-        wagerLayout->addWidget(amountEdit_);
+        amountRow->addWidget(amountEdit_);
+        amountColumn->addLayout(amountRow);
+        auto* committedRow = new QHBoxLayout;
+        committedRow->setContentsMargins(0, 0, 0, 0);
+        committedRow->addWidget(new QLabel("Committed", actions));
+        committedAmount_ = new QLineEdit(actions);
+        committedAmount_->setReadOnly(true);
+        committedAmount_->setFocusPolicy(Qt::NoFocus);
+        committedAmount_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        committedAmount_->setFixedWidth(amountEdit_->minimumWidth());
+        committedAmount_->setText("—");
+        committedRow->addWidget(committedAmount_);
+        amountColumn->addLayout(committedRow);
+        wagerLayout->addLayout(amountColumn);
         denominationControls_ = new QWidget(actions);
         denominationLayout_ = new QHBoxLayout(denominationControls_);
         denominationLayout_->setContentsMargins(0, 0, 0, 0);
@@ -1808,12 +1826,14 @@ private:
     void updateWagerSummary(bool raiseAvailable, qint64 currentBet) {
         wagerRaiseAvailable_ = raiseAvailable;
         if (!humanPlayer_) {
+            committedAmount_->setText("—");
             totalCommitment_->setText("—");
             raiseSummary_->clear();
             return;
         }
         const auto betAmount = amountEdit_->isEnabled() ? wagerAmount() : 0;
         const auto totalCommitment = wagerExistingCommitment_ + betAmount;
+        committedAmount_->setText(QLocale().toString(wagerExistingCommitment_));
         totalCommitment_->setText(QLocale().toString(totalCommitment));
         if (raiseAvailable) {
             const auto raiseBy = std::max<qint64>(0, totalCommitment - currentBet);
@@ -2458,6 +2478,7 @@ private:
         setActionControlsEnabled(false);
         setWagerControlsEnabled(false);
         amountEdit_->clear();
+        committedAmount_->setText("—");
         tableSequence_ = 0;
         lastShowdownSequence_ = -1;
         displayedActionHistoryCount_ = 0;
@@ -2567,6 +2588,7 @@ private:
     QPushButton* pausePlayButton_{};
     QPushButton* soundEffectsButton_{};
     QLineEdit* amountEdit_{};
+    QLineEdit* committedAmount_{};
     QLineEdit* totalCommitment_{};
     QLabel* raiseSummary_{};
     QWidget* denominationControls_{};

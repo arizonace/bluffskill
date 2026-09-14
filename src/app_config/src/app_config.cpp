@@ -84,7 +84,7 @@ Settings AppConfig::load() {
     settings.clientAutoConnect = store.value("client/autoConnect", false).toBool();
     settings.soundEffects = store.value("preferences/soundEffects", true).toBool();
     settings.detailedServerLogs = store.value("preferences/detailedServerLogs", false).toBool();
-    settings.storeActionsInJson = store.value("preferences/storeActionsInJson", true).toBool();
+    settings.storeActionsInJson = store.value("preferences/storeActionsInJson", false).toBool();
     if (store.contains("server/actionLogVisibleColumns")) {
         settings.serverActionLogVisibleColumns = store.value("server/actionLogVisibleColumns").toStringList();
     }
