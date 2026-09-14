@@ -4,6 +4,7 @@ add_library(bluffskill_poker STATIC
     src/august_virgo_reference_player.cpp
     src/house.cpp
     src/leo_reference_player.cpp
+    src/libra_reference_player.cpp
     src/reference_player.cpp
     src/table.cpp
     src/virgo_reference_player.cpp

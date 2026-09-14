@@ -16,6 +16,7 @@ std::string_view toString(ReferencePlayerType type) noexcept {
     case ReferencePlayerType::augustLeo: return "August Leo";
     case ReferencePlayerType::virgo: return "Virgo";
     case ReferencePlayerType::augustVirgo: return "August Virgo";
+    case ReferencePlayerType::libra: return "Libra";
     }
     return "Unknown";
 }

@@ -3,6 +3,7 @@
 #include "bluffskill/poker/august_leo_reference_player.hpp"
 #include "bluffskill/poker/august_virgo_reference_player.hpp"
 #include "bluffskill/poker/leo_reference_player.hpp"
+#include "bluffskill/poker/libra_reference_player.hpp"
 #include "bluffskill/poker/reference_player.hpp"
 #include "bluffskill/poker/virgo_reference_player.hpp"
 
@@ -140,11 +141,16 @@ std::unique_ptr<ReferencePlayerController> createAugustVirgo(std::string name, s
     });
 }
 
+std::unique_ptr<ReferencePlayerController> createLibra(std::string name, std::mt19937_64&) {
+    return std::make_unique<LibraReferencePlayer>(std::move(name));
+}
+
 constexpr std::array referencePlayerRegistrations{
     ReferencePlayerRegistration{ReferencePlayerType::leo, createLeo},
     ReferencePlayerRegistration{ReferencePlayerType::augustLeo, createAugustLeo},
     ReferencePlayerRegistration{ReferencePlayerType::virgo, createVirgo},
     ReferencePlayerRegistration{ReferencePlayerType::augustVirgo, createAugustVirgo},
+    ReferencePlayerRegistration{ReferencePlayerType::libra, createLibra},
 };
 
 } // namespace

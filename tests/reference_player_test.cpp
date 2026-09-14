@@ -2,6 +2,7 @@
 #include "bluffskill/poker/august_leo_reference_player.hpp"
 #include "bluffskill/poker/august_virgo_reference_player.hpp"
 #include "bluffskill/poker/leo_reference_player.hpp"
+#include "bluffskill/poker/libra_reference_player.hpp"
 #include "bluffskill/poker/virgo_reference_player.hpp"
 
 #include <cassert>
@@ -171,6 +172,23 @@ int main() {
     const auto strongRiverDecision = improvedLeo.chooseResponse(strongRiver, strongRiverRandom);
     assert(strongRiverDecision.action == Action::bet);
     assert(strongRiverDecision.amount >= 650 && strongRiverDecision.amount <= 1000);
+
+    // Libra is a deterministic, value-first baseline rather than a personality
+    // policy: it opens a premium, folds a weak full-ring hand, calls a direct
+    // draw at a favorable price, and never turns air into a checked-to bluff.
+    LibraReferencePlayer libra{"Libra"};
+    assert(libra.referenceType() == ReferencePlayerType::libra);
+    assert(libra.parameters().size() == 3);
+    std::mt19937_64 libraRandom{7};
+    assert(libra.chooseResponse(privateTurn("Libra", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace}), libraRandom).action == Action::raise);
+    const auto libraWeakFullRing = fullRingPreflop("Libra", {Suit::hearts, Rank::seven}, {Suit::hearts, Rank::five});
+    assert(libra.chooseResponse(libraWeakFullRing, libraRandom).action == Action::fold);
+    auto libraDraw = headsUpCheckedStreet("Libra", Street::flop, {Suit::hearts, Rank::seven}, {Suit::spades, Rank::eight});
+    libraDraw.communityCards = {{Suit::hearts, Rank::five}, {Suit::clubs, Rank::six}, {Suit::diamonds, Rank::king}};
+    libraDraw.legalActions = LegalActions{.call = true, .fold = true, .callAmount = 100};
+    assert(libra.chooseResponse(libraDraw, libraRandom).action == Action::call);
+    const auto libraAir = headsUpCheckedStreet("Libra", Street::flop, {Suit::spades, Rank::seven}, {Suit::hearts, Rank::six});
+    assert(libra.chooseResponse(libraAir, libraRandom).action == Action::check);
 
     VirgoReferencePlayer improvedVirgo{"Virgo", {.curiosity = 0.5, .hope = 0.7, .empathy = 0.5, .longevity = 0.5}};
     auto strongFlop = checkedFlop("Virgo", {Suit::spades, Rank::ace}, {Suit::hearts, Rank::ace});

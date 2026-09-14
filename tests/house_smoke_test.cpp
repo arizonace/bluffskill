@@ -12,6 +12,7 @@ int main() {
         bluffskill::poker::ReferencePlayerType::augustLeo,
         bluffskill::poker::ReferencePlayerType::virgo,
         bluffskill::poker::ReferencePlayerType::augustVirgo,
+        bluffskill::poker::ReferencePlayerType::libra,
     }));
     const auto created = house.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7000});
     assert(created.tables.front().name == "Hydrogen");
@@ -69,12 +70,12 @@ int main() {
     assert(mixedNames.size() == 9);
 
     bluffskill::poker::House allTypesHouse;
-    const auto allTypesCompetition = allTypesHouse.createSingleTableTournament({.maximumPlayers = 4, .startingStack = 7'000});
+    const auto allTypesCompetition = allTypesHouse.createSingleTableTournament({.maximumPlayers = 5, .startingStack = 7'000});
     for (const auto type : allTypesHouse.referencePlayerTypes()) {
         [[maybe_unused]] const auto populatedType = allTypesHouse.createReferencePlayers(allTypesCompetition.name, 1, type);
     }
     const auto allTypes = allTypesHouse.competition(allTypesCompetition.name);
-    assert(allTypes && allTypes->tables.front().players.size() == 4);
+    assert(allTypes && allTypes->tables.front().players.size() == 5);
     for (std::size_t index = 0; index < allTypes->tables.front().players.size(); ++index) {
         const auto& player = allTypes->tables.front().players[index].player;
         assert(player.referenceType == allTypesHouse.referencePlayerTypes()[index]);
