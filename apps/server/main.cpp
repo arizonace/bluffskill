@@ -27,6 +27,7 @@
 #include <QCheckBox>
 #include <QLineEdit>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QSet>
 #include <QSettings>
 #include <QSplitter>
@@ -281,7 +282,7 @@ public:
         return QHttpServerResponse(body, status);
     }
 
-    void refreshTree() {
+    void refreshTree(bool updatePlayerBackingStore = false) {
         tree_->clear();
         auto* house = new QTreeWidgetItem(tree_, {"House"});
         for (const auto& competition : house_.competitions()) {
@@ -309,7 +310,7 @@ public:
         }
         tree_->expandAll();
         refreshActionLog();
-        writePlayersBackingStore();
+        if (updatePlayerBackingStore) writePlayersBackingStore();
         refreshClearHouseAction();
     }
 
@@ -737,9 +738,31 @@ private:
         return QDir(exportDirectory()).filePath(QDateTime::currentDateTime().toString("HHmm-") + fileName);
     }
 
+    [[nodiscard]] static QString actionLogExportDirectory() {
+        QSettings settings;
+        const auto savedDirectory = settings.value("server/lastActionLogExportDirectory").toString();
+        if (!savedDirectory.isEmpty() && QDir(savedDirectory).exists()) return savedDirectory;
+
+        const auto legacyDirectory = settings.value("server/lastExportDirectory").toString();
+        const auto legacyInfo = QFileInfo(legacyDirectory);
+        if (legacyInfo.exists() && QRegularExpression("^\\d{4}-BluffSkill-action-log$").match(legacyInfo.fileName()).hasMatch()) {
+            return legacyInfo.dir().absolutePath();
+        }
+        return exportDirectory();
+    }
+
+    [[nodiscard]] static QString suggestedActionLogExportPath() {
+        return QDir(actionLogExportDirectory()).filePath(QDateTime::currentDateTime().toString("HHmm-") + "BluffSkill-action-log");
+    }
+
     static void rememberExportDirectory(const QString& path) {
         QSettings settings;
         settings.setValue("server/lastExportDirectory", QFileInfo(path).absolutePath());
+    }
+
+    static void rememberActionLogExportDirectory(const QString& folderPath) {
+        QSettings settings;
+        settings.setValue("server/lastActionLogExportDirectory", QFileInfo(folderPath).absolutePath());
     }
 
     [[nodiscard]] QJsonObject actionLogRecord(int row, int index) const {
@@ -952,17 +975,17 @@ private:
 
     void saveActionLog() {
         const auto folderPath = QFileDialog::getSaveFileName(this, "Save Action Log Folder",
-            suggestedExportPath("BluffSkill-action-log"), "Action Log Folder (*)");
+            suggestedActionLogExportPath(), "Action Log Folder (*)");
         if (folderPath.isEmpty()) return;
         if (!QDir().mkpath(folderPath)) {
             QMessageBox::warning(this, "Save failed", "Could not create the action-log folder.\n" + folderPath);
             return;
         }
         const QDir folder(folderPath);
-        writePlayersBackingStore();
         const auto savedCsv = copyBackingStore(actionLogPath(), folder.filePath("actions.csv"), "Action Log CSV");
         const auto savedPlayers = copyBackingStore(playersCsvPath(), folder.filePath("players.csv"), "Player CSV");
         const auto savedJson = saveActionLogJson(folder.filePath("summary.json"));
+        rememberActionLogExportDirectory(folderPath);
         if (savedCsv && savedPlayers && savedJson) statusBar()->showMessage("Saved action log to " + folderPath, 5'000);
     }
 
@@ -1542,7 +1565,7 @@ int main(int argc, char* argv[]) {
                 const auto competition = window.house().createApiPlayer(
                     competitionName.toStdString(), tableName.toStdString(), json.value("name").toString().toStdString(),
                     json.value("recordHoleCards").toBool(false));
-                window.refreshTree();
+                window.refreshTree(true);
                 return window.jsonResponse("POST /v1/competitions/" + competitionName + "/tables/" + tableName + "/players → 201",
                     competitionJson(competition), QHttpServerResponder::StatusCode::Created);
             } catch (const std::exception& exception) {
@@ -1564,7 +1587,7 @@ int main(int argc, char* argv[]) {
             try {
                 const auto competition = window.house().createReferencePlayers(
                     competitionName.toStdString(), static_cast<std::size_t>(json.value("count").toInt()), *type);
-                window.refreshTree();
+                window.refreshTree(true);
                 return window.jsonResponse("POST /v1/competitions/" + competitionName + "/reference-players → 201",
                     competitionJson(competition), QHttpServerResponder::StatusCode::Created);
             } catch (const std::exception& exception) {
