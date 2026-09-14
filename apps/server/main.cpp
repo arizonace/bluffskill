@@ -83,6 +83,8 @@ public:
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
         detailedServerLogs_ = new QCheckBox("Include JSON request and response bodies in the local server log", this);
         detailedServerLogs_->setChecked(settings.detailedServerLogs);
+        storeActionsInJson_ = new QCheckBox("Store Actions in JSON", this);
+        storeActionsInJson_->setChecked(settings.storeActionsInJson);
         for (int index = 0; index < 3; ++index) {
             ports_[index] = new QSpinBox(this); ports_[index]->setRange(1, 65535); ports_[index]->setValue(settings.serverPreferredPorts.value(index));
         }
@@ -95,6 +97,7 @@ public:
         layout->addRow("Preferred Port 2", ports_[1]);
         layout->addRow("Preferred Port 3", ports_[2]);
         layout->addRow("Detailed Server Logs", detailedServerLogs_);
+        layout->addRow(storeActionsInJson_);
         tabs->addTab(general, "General");
 
         auto* columns = new QWidget(tabs);
@@ -135,6 +138,7 @@ public:
         value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
         value.detailedServerLogs = detailedServerLogs_->isChecked();
+        value.storeActionsInJson = storeActionsInJson_->isChecked();
         value.serverActionLogVisibleColumns.clear();
         for (const auto* column : optionalActionLogColumns_) {
             const auto name = QString::fromUtf8(column);
@@ -154,6 +158,7 @@ private:
     QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
     QCheckBox* detailedServerLogs_{};
+    QCheckBox* storeActionsInJson_{};
     QHash<QString, QCheckBox*> actionLogColumns_;
     std::array<QSpinBox*, 3> ports_{};
 };
@@ -488,9 +493,7 @@ private:
         const QString& hole = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
-        const auto qualifiedGame = activeActionLogTableName_ == "Hydrogen"
-            ? activeActionLogCompetitionName_ + "::" + activeActionLogGameName_
-            : activeActionLogCompetitionName_ + ':' + activeActionLogTableName_ + ':' + activeActionLogGameName_;
+        const auto qualifiedGame = activeActionLogCompetitionName_ + ':' + activeActionLogGameName_;
         actionLog_->setItem(row, indexColumn, new QTableWidgetItem(QString::number(row + 1)));
         actionLog_->setItem(row, timestampColumn, new QTableWidgetItem(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss")));
         actionLog_->setItem(row, gameColumn, new QTableWidgetItem(qualifiedGame));
@@ -674,9 +677,11 @@ private:
                 winnerTimestamp = QDateTime::fromString(action.value("timestamp").toString(), "yyyy-MM-dd HH:mm:ss");
             }
         }
-        return {{"name", gameName}, {"table", tableName}, {"rounds", rounds}, {"duration", gameDuration(firstDeal, winnerTimestamp)},
+        QJsonObject result{{"name", gameName}, {"table", tableName}, {"rounds", rounds}, {"duration", gameDuration(firstDeal, winnerTimestamp)},
             {"winner", winner}, {"winnerKind", winnerKind}, {"runnerUp", runnerUp}, {"runnerUpKind", runnerUpKind},
-            {"constitution", gameConstitution(competition, tableName)}, {"actions", actions}};
+            {"constitution", gameConstitution(competition, tableName)}};
+        if (settings_.storeActionsInJson) result.insert("actions", actions);
+        return result;
     }
 
     [[nodiscard]] QJsonArray actionLogJson() const {
@@ -704,7 +709,7 @@ private:
                 }
                 games.append(gameLogJson(competition, tableName, gameName, actions));
             }
-            if (!games.isEmpty()) competitions.append(QJsonObject{{"name", competitionName}, {"games", games}});
+            if (!games.isEmpty()) competitions.append(QJsonObject{{"competition_name", competitionName}, {"games", games}});
         }
         return competitions;
     }
@@ -730,7 +735,7 @@ private:
                         {"folded", player.folded}, {"type", type}, {"profile", profile}});
                 }
             }
-            competitions.append(QJsonObject{{"name", QString::fromStdString(competition.name)}, {"players", players}});
+            competitions.append(QJsonObject{{"competition_name", QString::fromStdString(competition.name)}, {"table_players", players}});
         }
         return competitions;
     }
@@ -774,12 +779,17 @@ private:
     }
 
     void saveActionLog() {
-        QString selectedFilter;
-        const auto path = QFileDialog::getSaveFileName(this, "Save Action Log", suggestedExportPath("BluffSkill-action-log"),
-            "CSV (*.csv);;JSON (*.json)", &selectedFilter);
-        if (path.isEmpty()) return;
-        if (selectedFilter.startsWith("JSON")) saveActionLogJson(path);
-        else saveActionLogCsv(path);
+        const auto folderPath = QFileDialog::getSaveFileName(this, "Save Action Log Folder",
+            suggestedExportPath("BluffSkill-action-log"), "Action Log Folder (*)");
+        if (folderPath.isEmpty()) return;
+        if (!QDir().mkpath(folderPath)) {
+            QMessageBox::warning(this, "Save failed", "Could not create the action-log folder.\n" + folderPath);
+            return;
+        }
+        const QDir folder(folderPath);
+        const auto savedCsv = saveActionLogCsv(folder.filePath("actions.csv"));
+        const auto savedJson = saveActionLogJson(folder.filePath("summary.json"));
+        if (savedCsv && savedJson) statusBar()->showMessage("Saved action log to " + folderPath, 5'000);
     }
 
     void saveTableAsJson(const QString& competitionName, const QString& tableName) {
@@ -816,13 +826,8 @@ private:
 
         QMenu menu(tree_);
         auto* saveTableAction = menu.addAction("Save Table as JSON");
-        auto* saveLogAction = menu.addAction("Save Action Log as CSV");
         const auto* selected = menu.exec(tree_->viewport()->mapToGlobal(position));
         if (selected == saveTableAction) saveTableAsJson(competitionName, tableName);
-        if (selected == saveLogAction) {
-            const auto path = QFileDialog::getSaveFileName(this, "Save Action Log as CSV", suggestedExportPath(tableName + "-action-log.csv"), "CSV (*.csv)");
-            if (!path.isEmpty()) saveActionLogCsv(path, competitionName + '/' + tableName);
-        }
     }
 
     static QString actionFingerprint(const bluffskill::poker::ActionView& action) {

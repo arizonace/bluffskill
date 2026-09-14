@@ -17,6 +17,7 @@ int main() {
     assert(settings.serverPreferredPorts.at(2) == 53155);
     assert(settings.smallBlind == 25);
     assert(settings.stack == 7'500);
+    assert(settings.storeActionsInJson);
 
     assert(settings.serverActionLogVisibleColumns.contains("Timestamp"));
     assert(settings.serverActionLogVisibleColumns.contains("Game"));

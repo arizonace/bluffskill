@@ -31,6 +31,7 @@ struct Settings {
     bool clientAutoConnect{false};
     bool soundEffects{true};
     bool detailedServerLogs{false};
+    bool storeActionsInJson{true};
     // Only optional server action-log columns appear here.  The server keeps
     // player, action, and value visible; hole cards are never shown.
     QStringList serverActionLogVisibleColumns{"Timestamp", "Game", "Round", "Street", "Kind", "Stack", "Gain", "Pot", "Hand"};
