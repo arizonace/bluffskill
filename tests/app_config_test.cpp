@@ -16,5 +16,11 @@ int main() {
     assert(settings.serverPreferredPorts.at(1) == 53154);
     assert(settings.serverPreferredPorts.at(2) == 53155);
 
+    assert(settings.serverActionLogVisibleColumns.contains("Timestamp"));
+    assert(settings.serverActionLogVisibleColumns.contains("Game"));
+    assert(settings.serverActionLogVisibleColumns.contains("Round"));
+    assert(!settings.serverActionLogVisibleColumns.contains("Index"));
+    assert(!settings.serverActionLogVisibleColumns.contains("Hole"));
+
     return 0;
 }

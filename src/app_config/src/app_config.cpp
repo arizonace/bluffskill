@@ -83,6 +83,9 @@ Settings AppConfig::load() {
     settings.clientAutoConnect = store.value("client/autoConnect", false).toBool();
     settings.soundEffects = store.value("preferences/soundEffects", true).toBool();
     settings.detailedServerLogs = store.value("preferences/detailedServerLogs", false).toBool();
+    if (store.contains("server/actionLogVisibleColumns")) {
+        settings.serverActionLogVisibleColumns = store.value("server/actionLogVisibleColumns").toStringList();
+    }
     settings.serverPreferredPorts.clear();
     for (const auto& value : store.value("server/preferredPorts").toStringList()) {
         bool valid = false;
@@ -113,6 +116,7 @@ void AppConfig::save(const Settings& input) {
     store.setValue("client/autoConnect", settings.clientAutoConnect);
     store.setValue("preferences/soundEffects", settings.soundEffects);
     store.setValue("preferences/detailedServerLogs", settings.detailedServerLogs);
+    store.setValue("server/actionLogVisibleColumns", settings.serverActionLogVisibleColumns);
     QStringList ports;
     for (const auto port : settings.serverPreferredPorts) ports.append(QString::number(port));
     store.setValue("server/preferredPorts", ports);

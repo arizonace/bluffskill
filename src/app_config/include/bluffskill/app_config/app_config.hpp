@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 namespace bluffskill::app_config {
 
@@ -29,6 +30,9 @@ struct Settings {
     bool clientAutoConnect{false};
     bool soundEffects{true};
     bool detailedServerLogs{false};
+    // Only optional server action-log columns appear here.  The server keeps
+    // player, action, and value visible; hole cards are never shown.
+    QStringList serverActionLogVisibleColumns{"Timestamp", "Game", "Round", "Street", "Kind", "Stack", "Gain", "Pot", "Hand"};
 };
 
 class AppConfig final {

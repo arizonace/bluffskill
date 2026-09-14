@@ -47,7 +47,8 @@ public:
     [[nodiscard]] CompetitionSummary createSingleTableTournament(TournamentSpec spec);
     [[nodiscard]] CompetitionSummary createReferencePlayers(
         std::string_view competitionName, std::size_t count, ReferencePlayerType type = ReferencePlayerType::leo);
-    [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name);
+    [[nodiscard]] CompetitionSummary createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name,
+        bool recordHoleCardsWhenFolding = false);
     [[nodiscard]] std::vector<CompetitionSummary> competitions() const;
     [[nodiscard]] std::optional<CompetitionSummary> competition(std::string_view name) const;
     // A started table remains in progress until it has one surviving player or
@@ -61,12 +62,18 @@ public:
     // Server-console inspection only. REST adapters must never project bot profiles.
     [[nodiscard]] std::optional<ReferencePlayerInspection> referencePlayerInspection(
         std::string_view competitionName, std::string_view tableName, std::string_view playerName) const;
+    // Server-console export policy only.  Reference players permit their
+    // folding cards; API players must explicitly opt in at creation.
+    [[nodiscard]] bool recordsHoleCardsWhenFolding(
+        std::string_view competitionName, std::string_view tableName, std::string_view playerName) const;
     void submitAction(std::string_view competitionName, std::string_view tableName, std::string_view playerName,
         Action action, Chips amount, std::uint64_t expectedSequence);
     void startNextHand(std::string_view competitionName, std::string_view tableName);
     void restartTable(std::string_view competitionName, std::string_view tableName);
     [[nodiscard]] TableWinner quitGame(std::string_view competitionName, std::string_view tableName);
     void setBlindSchedule(BlindSchedule blindSchedule);
+    void pauseTable(std::string_view competitionName, std::string_view tableName);
+    void resumeTable(std::string_view competitionName, std::string_view tableName);
 
 private:
     struct Competition {

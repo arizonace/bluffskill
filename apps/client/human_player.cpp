@@ -8,7 +8,8 @@
 
 namespace bluffskill::client {
 
-HumanPlayer::HumanPlayer(QString apiPlayerName) : apiPlayerName_(std::move(apiPlayerName)) {}
+HumanPlayer::HumanPlayer(QString apiPlayerName, bool recordHoleCardsWhenFolding)
+    : apiPlayerName_(std::move(apiPlayerName)), recordHoleCardsWhenFolding_(recordHoleCardsWhenFolding) {}
 
 const QString& HumanPlayer::apiPlayerName() const noexcept { return apiPlayerName_; }
 
@@ -53,7 +54,8 @@ QNetworkReply* HumanPlayer::attachToTable(
     endpoint.setPath("/v1/competitions/" + competitionName + "/tables/" + tableName + "/players");
     QNetworkRequest request(endpoint);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    return network.post(request, QJsonDocument(QJsonObject{{"name", apiPlayerName_}}).toJson(QJsonDocument::Compact));
+    return network.post(request, QJsonDocument(QJsonObject{{"name", apiPlayerName_},
+        {"recordHoleCards", recordHoleCardsWhenFolding_}}).toJson(QJsonDocument::Compact));
 }
 
 } // namespace bluffskill::client

@@ -281,6 +281,18 @@ void Table::setBlindSchedule(BlindSchedule blindSchedule) {
     blindSchedule_ = blindSchedule;
 }
 
+void Table::pauseBlindClock() {
+    if (!blindClockStarted_ || blindClockPaused_) return;
+    blindClockPaused_ = true;
+    blindClockPausedAt_ = std::chrono::steady_clock::now();
+}
+
+void Table::resumeBlindClock() {
+    if (!blindClockPaused_) return;
+    blindLevelStartedAt_ += std::chrono::steady_clock::now() - blindClockPausedAt_;
+    blindClockPaused_ = false;
+}
+
 Chips Table::smallBlindAmount() const {
     const auto multiplier = static_cast<Chips>(1) << std::min<std::size_t>(blindLevel_, 20);
     return blindSchedule_.smallBlind * multiplier;
@@ -301,8 +313,8 @@ void Table::advanceBlindLevelIfDue() {
         blindLevelStartedAt_ = now;
         return;
     }
-    if (handsAtCurrentBlindLevel_ < blindSchedule_.handsPerLevel
-        && now - blindLevelStartedAt_ < blindSchedule_.minutesPerLevel) return;
+    if (blindClockPaused_ || (handsAtCurrentBlindLevel_ < blindSchedule_.handsPerLevel
+        && now - blindLevelStartedAt_ < blindSchedule_.minutesPerLevel)) return;
     ++blindLevel_;
     handsAtCurrentBlindLevel_ = 0;
     blindLevelStartedAt_ = now;
@@ -410,6 +422,7 @@ void Table::restartGame(std::string gameName) {
     handsAtCurrentBlindLevel_ = 0;
     roundsPlayed_ = 0;
     blindClockStarted_ = false;
+    blindClockPaused_ = false;
     blindLevelStartedAt_ = std::chrono::steady_clock::now();
     deck_.reset();
     startHand();

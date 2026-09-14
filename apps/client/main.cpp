@@ -9,11 +9,11 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QDoubleValidator>
+#include <QElapsedTimer>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QIntValidator>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -778,6 +778,7 @@ private:
 
 struct CustomGameConfiguration {
     bool includeHuman{true};
+    bool humanRecordsHoleCards{false};
     int repetitions{1};
     QString playerName;
     struct ReferencePlayerCount {
@@ -785,6 +786,35 @@ struct CustomGameConfiguration {
         int count{0};
     };
     QVector<ReferencePlayerCount> referencePlayers;
+};
+
+class NewGameDialog final : public QDialog {
+public:
+    explicit NewGameDialog(const QString& defaultPlayerName, QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle("New Game");
+        auto* layout = new QFormLayout(this);
+        playerName_ = new QLineEdit(defaultPlayerName, this);
+        recordHoleCards_ = new QCheckBox("Record my hole cards when I fold in the private server action log", this);
+        layout->addRow("Player name", playerName_);
+        layout->addRow("Fold-card logging", recordHoleCards_);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, [this] {
+            if (playerName_->text().trimmed().isEmpty()) {
+                QMessageBox::warning(this, "Player name required", "Choose a name using letters, digits, and dashes.");
+                return;
+            }
+            accept();
+        });
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addRow(buttons);
+    }
+
+    [[nodiscard]] QString playerName() const { return playerName_->text().trimmed(); }
+    [[nodiscard]] bool recordsHoleCards() const { return recordHoleCards_->isChecked(); }
+
+private:
+    QLineEdit* playerName_{};
+    QCheckBox* recordHoleCards_{};
 };
 
 class CustomGameDialog final : public QDialog {
@@ -798,12 +828,15 @@ public:
         includeHuman_ = new QCheckBox("Include local human player", this);
         includeHuman_->setChecked(previous ? previous->includeHuman : true);
         playerName_ = new QLineEdit(previous ? previous->playerName : defaultPlayerName, this);
+        recordHoleCards_ = new QCheckBox("Record my hole cards when I fold in the private server action log", this);
+        recordHoleCards_->setChecked(previous && previous->humanRecordsHoleCards);
         repetitions_ = new QSpinBox(this);
         repetitions_->setRange(1, 28);
         repetitions_->setValue(previous ? previous->repetitions : 1);
         total_ = new QLabel(this);
         form->addRow("Human player", includeHuman_);
         form->addRow("Player name", playerName_);
+        form->addRow("Fold-card logging", recordHoleCards_);
         form->addRow("Repetitions", repetitions_);
         for (const auto& type : referencePlayerTypes) {
             auto* count = new QSpinBox(this);
@@ -833,7 +866,8 @@ public:
     }
 
     [[nodiscard]] CustomGameConfiguration configuration() const {
-        CustomGameConfiguration configuration{.includeHuman = includeHuman_->isChecked(), .repetitions = repetitions_->value(),
+        CustomGameConfiguration configuration{.includeHuman = includeHuman_->isChecked(),
+            .humanRecordsHoleCards = recordHoleCards_->isChecked(), .repetitions = repetitions_->value(),
             .playerName = playerName_->text().trimmed()};
         for (const auto& player : referencePlayers_) {
             configuration.referencePlayers.append({.type = player.type, .count = player.count->value()});
@@ -844,6 +878,7 @@ public:
 private:
     void updateState() {
         playerName_->setEnabled(includeHuman_->isChecked());
+        recordHoleCards_->setEnabled(includeHuman_->isChecked());
         auto total = includeHuman_->isChecked() ? 1 : 0;
         for (const auto& player : referencePlayers_) total += player.count->value();
         const auto valid = total == defaultTableSeats && (!includeHuman_->isChecked() || !playerName_->text().trimmed().isEmpty());
@@ -854,6 +889,7 @@ private:
 
     QCheckBox* includeHuman_{};
     QLineEdit* playerName_{};
+    QCheckBox* recordHoleCards_{};
     QSpinBox* repetitions_{};
     struct ReferencePlayerControl {
         QString type;
@@ -1010,6 +1046,11 @@ public:
         denominationLayout_->setContentsMargins(0, 0, 0, 0);
         denominationLayout_->setSpacing(6);
         wagerLayout->addWidget(denominationControls_);
+        quickWagerControls_ = new QWidget(actions);
+        quickWagerLayout_ = new QHBoxLayout(quickWagerControls_);
+        quickWagerLayout_->setContentsMargins(0, 0, 0, 0);
+        quickWagerLayout_->setSpacing(6);
+        wagerLayout->addWidget(quickWagerControls_);
         wagerLayout->addSpacing(16);
         wagerLayout->addWidget(new QLabel("Total commitment", actions));
         totalCommitment_ = new QLineEdit(actions);
@@ -1054,10 +1095,12 @@ public:
         connect(table_, &QComboBox::currentIndexChanged, this, [this] { refreshSeats(); });
         nextHandTimer_.setSingleShot(true);
         automatedActionTimer_.setSingleShot(true);
+        automatedRestartTimer_.setSingleShot(true);
         connect(&nextHandTimer_, &QTimer::timeout, this, [this] { startNextHand(); });
         connect(&nextDealCountdownTimer_, &QTimer::timeout, this, [this] { advanceNextDealCountdown(); });
         connect(&turnCountdownTimer_, &QTimer::timeout, this, [this] { advanceTurnCountdown(); });
         connect(&automatedActionTimer_, &QTimer::timeout, this, [this] { presentNextAutomatedAction(); });
+        connect(&automatedRestartTimer_, &QTimer::timeout, this, [this] { restartAutomatedGame(); });
         statusBar()->showMessage("Choose Connection → Connect… to begin.");
         if (settings_.clientAutoConnect) QTimer::singleShot(0, this, [this] { autoConnectNext(); });
     }
@@ -1096,10 +1139,12 @@ private:
     void editSettings() {
         SettingsDialog dialog(settings_, this);
         if (dialog.exec() != QDialog::Accepted) return;
+        const auto previous = settings_;
         settings_ = dialog.settings(settings_);
         bluffskill::app_config::AppConfig::save(settings_);
         setSoundEffectsButtonState();
-        statusBar()->showMessage("Settings saved. New clock values apply to the next countdown.");
+        applyUpdatedPresentationDelays(previous);
+        statusBar()->showMessage("Settings saved. Active automated waits use the new delays immediately.");
     }
 
     void showAbout() {
@@ -1427,6 +1472,17 @@ private:
         const auto canSetAmount = humanPlayer_ && (legal.value("bet").toBool() || legal.value("raise").toBool()) && maximum >= minimum;
         wagerMinimum_ = std::max<qint64>(0, minimum - wagerExistingCommitment_);
         wagerMaximum_ = std::max<qint64>(0, maximum - wagerExistingCommitment_);
+        qint64 localStack = 0;
+        if (humanPlayer_) {
+            for (const auto& item : view.value("players").toArray()) {
+                const auto player = item.toObject();
+                if (player.value("name").toString() == humanPlayer_->apiPlayerName()) {
+                    localStack = player.value("stack").toInteger();
+                    break;
+                }
+            }
+        }
+        setQuickWagerAmounts(view.value("bigBlind").toInteger(), minimum, localStack);
         setWagerControlsEnabled(canSetAmount);
         if (canSetAmount) {
             if (!amountEdit_->hasFocus()) setWagerAmount(wagerMinimum_);
@@ -1448,7 +1504,7 @@ private:
                 if (!humanPlayer_ && automatedRepetitionsRemaining_ > 0) {
                     --automatedRepetitionsRemaining_;
                     statusBar()->showMessage("Table winner: " + tableWinner + ". Starting the next automated game…");
-                    QTimer::singleShot(settings_.uninterruptedDealerDelayMilliseconds, this, [this] { restartAutomatedGame(); });
+                    scheduleAutomatedRestart();
                     return;
                 }
                 statusBar()->showMessage("Table winner: " + tableWinner + ". The game is complete. Choose Game → Restart Game to play again.");
@@ -1460,7 +1516,7 @@ private:
                 : settings_.dealClockSeconds * 1'000;
             if (lastShowdownSequence_ != tableSequence_) {
                 lastShowdownSequence_ = tableSequence_;
-                beginNextDealCountdown(dealerDelayMilliseconds);
+                beginNextDealCountdown(dealerDelayMilliseconds, !humanPlayer_ || humanPlayerBusted(view));
             }
         } else {
             stopNextDealCountdown();
@@ -1701,6 +1757,8 @@ private:
             statusBar()->showMessage(action.player + " " + action.action.toLower()
                 + (action.amount > 0 ? " " + QLocale().toString(action.amount) : "") + ".");
         }
+        automatedActionWaitedMilliseconds_ = 0;
+        automatedActionElapsed_.restart();
         automatedActionTimer_.start(settings_.automatedPlayerDelayMilliseconds);
     }
 
@@ -1708,6 +1766,8 @@ private:
         amountEdit_->setEnabled(enabled);
         for (auto* button : denominationUp_) button->setEnabled(enabled);
         for (auto* button : denominationDown_) button->setEnabled(enabled);
+        for (auto* button : quickWagerUp_) button->setEnabled(enabled);
+        for (auto* button : quickWagerDown_) button->setEnabled(enabled);
     }
 
     void setActionClockVisible(bool visible) {
@@ -1811,6 +1871,41 @@ private:
         }
     }
 
+    void setQuickWagerAmounts(qint64 bigBlind, qint64 minimumBet, qint64 stackAmount) {
+        while (auto* item = quickWagerLayout_->takeAt(0)) {
+            if (auto* widget = item->widget()) widget->deleteLater();
+            delete item;
+        }
+        quickWagerUp_.clear();
+        quickWagerDown_.clear();
+        const std::array amounts{
+            std::pair{QStringLiteral("Big Blind"), bigBlind},
+            std::pair{QStringLiteral("Minimum Bet"), minimumBet},
+            std::pair{QStringLiteral("Stack"), stackAmount},
+        };
+        for (const auto& [label, amount] : amounts) {
+            auto* controls = new QWidget(quickWagerControls_);
+            auto* controlsLayout = new QVBoxLayout(controls);
+            controlsLayout->setContentsMargins(0, 0, 0, 0);
+            auto* up = new QToolButton(controls);
+            up->setText("▲");
+            up->setAccessibleName(label + " amount up: " + QLocale().toString(amount));
+            auto* down = new QToolButton(controls);
+            down->setText("▼");
+            down->setAccessibleName(label + " amount down: " + QLocale().toString(amount));
+            auto* amountLabel = new QLabel(label + "\n" + QLocale().toString(amount), controls);
+            amountLabel->setAlignment(Qt::AlignHCenter);
+            connect(up, &QToolButton::clicked, this, [this, amount] { adjustWagerAmount(amount); });
+            connect(down, &QToolButton::clicked, this, [this, amount] { adjustWagerAmount(-amount); });
+            controlsLayout->addWidget(up, 0, Qt::AlignHCenter);
+            controlsLayout->addWidget(amountLabel, 0, Qt::AlignHCenter);
+            controlsLayout->addWidget(down, 0, Qt::AlignHCenter);
+            quickWagerLayout_->addWidget(controls);
+            quickWagerUp_.append(up);
+            quickWagerDown_.append(down);
+        }
+    }
+
     [[nodiscard]] qint64 normalizedWagerAmount(qint64 amount) const {
         if (wagerMaximum_ < wagerMinimum_) return 0;
         const auto bounded = std::max(amount, wagerMinimum_);
@@ -1821,8 +1916,53 @@ private:
         return std::clamp(std::min(roundedUp, maximumChipValue), wagerMinimum_, maximumChipValue);
     }
 
-    void beginNextDealCountdown(int delayMilliseconds) {
+    void applyUpdatedPresentationDelays(const bluffskill::app_config::Settings& previous) {
+        if (automatedActionTimer_.isActive()
+            && previous.automatedPlayerDelayMilliseconds != settings_.automatedPlayerDelayMilliseconds) {
+            automatedActionWaitedMilliseconds_ += static_cast<int>(automatedActionElapsed_.elapsed());
+            automatedActionTimer_.stop();
+            const auto remaining = settings_.automatedPlayerDelayMilliseconds - automatedActionWaitedMilliseconds_;
+            if (remaining <= 0) {
+                QTimer::singleShot(0, this, [this] { presentNextAutomatedAction(); });
+            } else {
+                automatedActionElapsed_.restart();
+                automatedActionTimer_.start(remaining);
+            }
+        }
+        if (!paused_ && nextHandTimer_.isActive() && nextDealUsesUninterruptedDelay_
+            && previous.uninterruptedDealerDelayMilliseconds != settings_.uninterruptedDealerDelayMilliseconds) {
+            const auto waited = std::max(0, previous.uninterruptedDealerDelayMilliseconds - nextDealMilliseconds_);
+            nextHandTimer_.stop();
+            nextDealMilliseconds_ = std::max(0, settings_.uninterruptedDealerDelayMilliseconds - waited);
+            nextDealIn_->setText(countdownValue(nextDealMilliseconds_));
+            if (nextDealMilliseconds_ == 0) {
+                QTimer::singleShot(0, this, [this] { startNextHand(); });
+            } else {
+                nextHandTimer_.start(nextDealMilliseconds_);
+            }
+        }
+        if (automatedRestartTimer_.isActive()
+            && previous.uninterruptedDealerDelayMilliseconds != settings_.uninterruptedDealerDelayMilliseconds) {
+            automatedRestartWaitedMilliseconds_ += static_cast<int>(automatedRestartElapsed_.elapsed());
+            automatedRestartTimer_.stop();
+            const auto remaining = settings_.uninterruptedDealerDelayMilliseconds - automatedRestartWaitedMilliseconds_;
+            if (remaining <= 0) QTimer::singleShot(0, this, [this] { restartAutomatedGame(); });
+            else {
+                automatedRestartElapsed_.restart();
+                automatedRestartTimer_.start(remaining);
+            }
+        }
+    }
+
+    void scheduleAutomatedRestart() {
+        automatedRestartWaitedMilliseconds_ = 0;
+        automatedRestartElapsed_.restart();
+        automatedRestartTimer_.start(settings_.uninterruptedDealerDelayMilliseconds);
+    }
+
+    void beginNextDealCountdown(int delayMilliseconds, bool uninterruptedDelay = false) {
         if (pauseReason_ == PauseReason::deal) { paused_ = false; pauseReason_ = PauseReason::none; }
+        nextDealUsesUninterruptedDelay_ = uninterruptedDelay;
         nextDealMilliseconds_ = delayMilliseconds;
         nextDealIn_->setText(countdownValue(nextDealMilliseconds_));
         dealNowButton_->setEnabled(true);
@@ -1835,6 +1975,7 @@ private:
     void stopNextDealCountdown() {
         nextHandTimer_.stop();
         nextDealCountdownTimer_.stop();
+        nextDealUsesUninterruptedDelay_ = false;
         nextDealMilliseconds_ = 0;
         if (nextDealIn_) nextDealIn_->setText("—");
         if (dealNowButton_) dealNowButton_->setEnabled(false);
@@ -1883,7 +2024,33 @@ private:
     }
 
     void togglePause() {
-        if (!paused_) {
+        if (!connected_ || pauseRequestInFlight_) return;
+        const auto pause = !paused_;
+        if (pause && !turnCountdownTimer_.isActive() && !nextHandTimer_.isActive()) return;
+        if (competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        pauseRequestInFlight_ = true;
+        pausePlayButton_->setEnabled(false);
+        const auto attempt = connectionGeneration_;
+        const auto path = "/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText()
+            + (pause ? "/pause" : "/resume");
+        auto* reply = postJson(path, QJsonObject{});
+        connect(reply, &QNetworkReply::finished, this, [this, reply, pause, attempt] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            pauseRequestInFlight_ = false;
+            if (attempt != connectionGeneration_ || !connected_) return;
+            if (!success) {
+                pausePlayButton_->setEnabled(true);
+                statusBar()->showMessage("The server could not change the pause state.");
+                return;
+            }
+            setPaused(pause);
+        });
+    }
+
+    void setPaused(bool pause) {
+        if (pause) {
             if (turnCountdownTimer_.isActive()) {
                 turnCountdownTimer_.stop();
                 pauseReason_ = PauseReason::turn;
@@ -2051,18 +2218,14 @@ private:
 
     void newGame() {
         if (!connected_) return;
-        bool accepted = false;
-        const auto playerName = QInputDialog::getText(this, "Your player", "Player name:", QLineEdit::Normal, settings_.defaultPlayerName, &accepted).trimmed();
-        if (!accepted) return;
-        if (playerName.isEmpty()) {
-            QMessageBox::warning(this, "Player name required", "Choose a name using letters, digits, and dashes.");
-            return;
-        }
+        NewGameDialog dialog(settings_.defaultPlayerName, this);
+        if (dialog.exec() != QDialog::Accepted) return;
+        const auto playerName = dialog.playerName();
         settings_.defaultPlayerName = playerName;
         bluffskill::app_config::AppConfig::save(settings_);
         clearHumanPlayer();
         const auto attempt = connectionGeneration_;
-        pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName);
+        pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName, dialog.recordsHoleCards());
         setNewGameActionsEnabled(false);
         const auto humanSeat = QRandomGenerator::global()->bounded(1, defaultTableSeats + 1);
         const auto referenceTypes = randomReferencePlayerTypes(defaultTableSeats - 1);
@@ -2109,7 +2272,8 @@ private:
         if (configuration.includeHuman) {
             settings_.defaultPlayerName = configuration.playerName;
             bluffskill::app_config::AppConfig::save(settings_);
-            pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(configuration.playerName);
+            pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(
+                configuration.playerName, configuration.humanRecordsHoleCards);
         }
 
         auto referenceTypes = referencePlayerTypes(configuration.referencePlayers);
@@ -2361,18 +2525,25 @@ private:
     int turnSeconds_{};
     bool connected_{};
     bool paused_{};
+    bool pauseRequestInFlight_{};
     bool nextHandRequestInFlight_{};
     bool autoConnectInProgress_{};
     bool tableComplete_{};
     bool turnCanCheck_{};
     bool turnCanFold_{};
     bool presentFinalAutomatedActions_{};
+    bool nextDealUsesUninterruptedDelay_{};
+    int automatedActionWaitedMilliseconds_{};
+    int automatedRestartWaitedMilliseconds_{};
     int automatedRepetitionsRemaining_{};
     PauseReason pauseReason_{PauseReason::none};
     QTimer nextHandTimer_;
     QTimer nextDealCountdownTimer_;
     QTimer turnCountdownTimer_;
     QTimer automatedActionTimer_;
+    QTimer automatedRestartTimer_;
+    QElapsedTimer automatedActionElapsed_;
+    QElapsedTimer automatedRestartElapsed_;
     QVector<AutomatedActionPresentation> automatedActionQueue_;
     QSoundEffect bustSound_;
     QSoundEffect wagerSound_;
@@ -2406,6 +2577,10 @@ private:
     QHBoxLayout* denominationLayout_{};
     QVector<QToolButton*> denominationUp_;
     QVector<QToolButton*> denominationDown_;
+    QWidget* quickWagerControls_{};
+    QHBoxLayout* quickWagerLayout_{};
+    QVector<QToolButton*> quickWagerUp_;
+    QVector<QToolButton*> quickWagerDown_;
     QVector<qint64> chipDenominations_;
     qint64 wagerMinimum_{};
     qint64 wagerMaximum_{};

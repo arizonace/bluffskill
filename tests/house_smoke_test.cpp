@@ -42,6 +42,16 @@ int main() {
     assert(seatedApiPlayer.player.kind == bluffskill::poker::PlayerKind::api);
     assert(seatedApiPlayer.seat == 7);
     assert(!house.referencePlayerInspection(created.name, "Hydrogen", "Arizona"));
+    assert(!house.recordsHoleCardsWhenFolding(created.name, "Hydrogen", "Arizona"));
+    assert(house.recordsHoleCardsWhenFolding(created.name, "Hydrogen", *names.begin()));
+
+    bluffskill::poker::House optedInHouse;
+    const auto optedInCompetition = optedInHouse.createSingleTableTournament({.maximumPlayers = 2, .startingStack = 7'000});
+    [[maybe_unused]] const auto optedIn = optedInHouse.createApiPlayer(
+        optedInCompetition.name, "Hydrogen", "CardRecorder", true);
+    assert(optedInHouse.recordsHoleCardsWhenFolding(optedInCompetition.name, "Hydrogen", "CardRecorder"));
+    optedInHouse.pauseTable(optedInCompetition.name, "Hydrogen");
+    optedInHouse.resumeTable(optedInCompetition.name, "Hydrogen");
 
     bluffskill::poker::House mixedHouse;
     const auto mixedCompetition = mixedHouse.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7'000});

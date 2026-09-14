@@ -292,14 +292,15 @@ CompetitionSummary House::createReferencePlayers(std::string_view competitionNam
     return summaryOf(competition);
 }
 
-CompetitionSummary House::createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name) {
+CompetitionSummary House::createApiPlayer(std::string_view competitionName, std::string_view tableName, std::string name,
+    bool recordHoleCardsWhenFolding) {
     auto& competition = findCompetition(competitionName);
     validatePlayerName(competition, name);
     const auto tableIndex = findTableIndex(competition, tableName);
     const auto seat = firstFreeSeat(competition, tableIndex);
     if (!seat) throw std::invalid_argument("table has no free seats");
     competition.players.push_back({
-        .player = std::make_unique<ApiPlayer>(std::move(name)),
+        .player = std::make_unique<ApiPlayer>(std::move(name), recordHoleCardsWhenFolding),
         .tableIndex = tableIndex,
         .seat = *seat,
     });
@@ -308,6 +309,28 @@ CompetitionSummary House::createApiPlayer(std::string_view competitionName, std:
     table.seatPlayer(player.player->name(), player.player->kind(), *seat, static_cast<Chips>(competition.summary.tournament.startingStack));
     startTableIfReady(competition, tableIndex);
     return summaryOf(competition);
+}
+
+bool House::recordsHoleCardsWhenFolding(
+    std::string_view competitionName, std::string_view tableName, std::string_view playerName) const {
+    const auto& competition = *findCompetition(competitionName);
+    const auto tableIndex = findTableIndex(competition, tableName);
+    const auto player = std::ranges::find_if(competition.players, [tableIndex, playerName](const auto& candidate) {
+        return candidate.tableIndex == tableIndex && candidate.player->name() == playerName;
+    });
+    if (player == competition.players.end()) throw std::invalid_argument("player was not found");
+    const auto* apiPlayer = dynamic_cast<const ApiPlayer*>(player->player.get());
+    return apiPlayer == nullptr || apiPlayer->recordsHoleCardsWhenFolding();
+}
+
+void House::pauseTable(std::string_view competitionName, std::string_view tableName) {
+    auto& competition = findCompetition(competitionName);
+    findTable(competition, tableName).pauseBlindClock();
+}
+
+void House::resumeTable(std::string_view competitionName, std::string_view tableName) {
+    auto& competition = findCompetition(competitionName);
+    findTable(competition, tableName).resumeBlindClock();
 }
 
 void House::startTableIfReady(Competition& competition, std::size_t tableIndex) {

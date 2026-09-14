@@ -12,10 +12,11 @@ namespace bluffskill::client {
 
 enum class HumanAction { check, call, bet, raise, fold };
 
-// A local, human-operated controller. Its attach request intentionally contains no human-specific data.
+// A local, human-operated controller. Its attach request identifies only an
+// API player and may carry local action-log card consent.
 class HumanPlayer final {
 public:
-    explicit HumanPlayer(QString apiPlayerName);
+    explicit HumanPlayer(QString apiPlayerName, bool recordHoleCardsWhenFolding = false);
 
     [[nodiscard]] const QString& apiPlayerName() const noexcept;
     void selectAction(HumanAction action) noexcept;
@@ -37,6 +38,7 @@ public:
 
 private:
     QString apiPlayerName_;
+    bool recordHoleCardsWhenFolding_{false};
     std::optional<HumanAction> selectedAction_;
 };
 

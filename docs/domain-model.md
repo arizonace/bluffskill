@@ -51,6 +51,7 @@ Reject punctuation that conflicts with qualified forms. The built-in house data 
 - The house is one process-owned instance; a dealer is always automated and never seated.
 - Only the player whose turn it is may submit an action. An accepted action is immutable history.
 - A table transition is atomic: validate, alter commitments, recompute pots, resolve the next actor, append the event, then publish its views.
+- A pause is server-authoritative. It suspends the table's time-based blind clock as well as the client's presentation timer, so paused wall-clock time never advances blinds.
 - Side-pot eligibility is based on contributions and fold status, not on current stack.
 - Only a view projection may leave the engine.
 - A house may be cleared only when every started table has a winner or was deliberately quit; clearing removes all competitions, tables, and players. Quitting selects the chip leader (including chips committed in an active hand), resolving an equal total by the lower one-based seat, and ends that table without settling its active hand.
