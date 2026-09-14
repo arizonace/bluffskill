@@ -186,7 +186,7 @@ public:
     explicit ServerWindow(bluffskill::app_config::Settings settings)
         : house_(pokerBlindSchedule(settings), pokerChipDenominations(settings)), settings_(std::move(settings)) {
         initializeServerLog();
-        initializeActionLogBackingStore();
+        initializeRecoveryBackingStores();
         connect(&serverLogRotationTimer_, &QTimer::timeout, this, [this] {
             rotateServerLogIfNeeded();
             scheduleServerLogRotation();
@@ -237,6 +237,10 @@ public:
         connect(aboutAction, &QAction::triggered, this, [this] { showAbout(); });
         connect(tree_, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& position) { showTreeContextMenu(position); });
         refreshTree();
+    }
+
+    ~ServerWindow() override {
+        QFile::remove(runningMarkerPath());
     }
 
     void log(const QString& message) {
@@ -305,6 +309,7 @@ public:
         }
         tree_->expandAll();
         refreshActionLog();
+        writePlayersBackingStore();
         refreshClearHouseAction();
     }
 
@@ -377,11 +382,57 @@ private:
     }
 
     [[nodiscard]] static QString actionLogPath() {
-        return QDir(serverLogDirectory()).filePath("actions.log");
+        return QDir(serverLogDirectory()).filePath("actions.csv");
+    }
+
+    [[nodiscard]] static QString playersCsvPath() {
+        return QDir(serverLogDirectory()).filePath("players.csv");
+    }
+
+    [[nodiscard]] static QString runningMarkerPath() {
+        return QDir(serverLogDirectory()).filePath("bluffskill-server.dirty");
+    }
+
+    [[nodiscard]] static QString recoveredPath(const QString& sourcePath) {
+        const QFileInfo source(sourcePath);
+        const auto timestamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+        auto destination = source.dir().filePath(source.completeBaseName() + '-' + timestamp + "-recovered." + source.suffix());
+        for (int suffix = 1; QFile::exists(destination); ++suffix) {
+            destination = source.dir().filePath(source.completeBaseName() + '-' + timestamp + "-recovered-" + QString::number(suffix)
+                + '.' + source.suffix());
+        }
+        return destination;
+    }
+
+    void preserveBackingStoreAfterCrash(const QString& sourcePath) {
+        if (!QFile::exists(sourcePath)) return;
+        const auto destination = recoveredPath(sourcePath);
+        if (QFile::rename(sourcePath, destination)) {
+            log("Recovered unclean-run backing store as " + destination);
+        } else {
+            log("Error: could not preserve unclean-run backing store " + sourcePath);
+        }
+    }
+
+    void initializeRecoveryBackingStores() {
+        QDir().mkpath(serverLogDirectory());
+        if (QFile::exists(runningMarkerPath())) {
+            log("Detected an unclean previous server exit; preserving its CSV backing stores.");
+            preserveBackingStoreAfterCrash(actionLogPath());
+            preserveBackingStoreAfterCrash(playersCsvPath());
+        }
+
+        QFile marker(runningMarkerPath());
+        const auto markerContents = QDateTime::currentDateTime().toString(Qt::ISODate).toUtf8();
+        if (!marker.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)
+            || marker.write(markerContents) != markerContents.size() || !marker.flush()) {
+            log("Error: could not create server running marker: " + marker.errorString());
+        }
+        initializeActionLogBackingStore();
+        initializePlayersBackingStore();
     }
 
     void initializeActionLogBackingStore() {
-        QDir().mkpath(serverLogDirectory());
         QFile file(actionLogPath());
         if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
             log("Error: could not initialize persistent action log: " + file.errorString());
@@ -390,6 +441,18 @@ private:
         const auto header = actionLogCsvHeader().toUtf8();
         if (file.write(header) != header.size() || !file.flush()) {
             log("Error: could not write persistent action log: " + file.errorString());
+        }
+    }
+
+    void initializePlayersBackingStore() {
+        QFile file(playersCsvPath());
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            log("Error: could not initialize persistent player log: " + file.errorString());
+            return;
+        }
+        const auto header = playersCsvHeader().toUtf8();
+        if (file.write(header) != header.size() || !file.flush()) {
+            log("Error: could not write persistent player log: " + file.errorString());
         }
     }
 
@@ -466,6 +529,7 @@ private:
         }
         house_.clear();
         clearLog();
+        initializePlayersBackingStore();
         log("Server house cleared");
         refreshTree();
     }
@@ -615,6 +679,12 @@ private:
         return "Index,Timestamp,Game,Round,Street,Player,Kind,Action,Value,Stack,Gain,Pot,Hand,Hole\n";
     }
 
+    [[nodiscard]] static QString playersCsvHeader(const QStringList& profileColumns = {}) {
+        QStringList columns{"Competition", "Table", "Name", "Kind", "Type", "Seat", "Stack", "Committed", "Folded"};
+        columns.append(profileColumns);
+        return columns.join(',') + '\n';
+    }
+
     [[nodiscard]] QString actionLogCsvRow(int row, int serializedIndex) const {
         QString csv = QString::number(serializedIndex);
         for (int column = timestampColumn; column < actionLog_->columnCount(); ++column) {
@@ -632,19 +702,19 @@ private:
         return file.write(csv) == csv.size() && file.flush();
     }
 
-    bool copyActionLogBackingStore(const QString& destination) {
-        QFile backingStore(actionLogPath());
+    bool copyBackingStore(const QString& sourcePath, const QString& destination, const QString& description) {
+        QFile backingStore(sourcePath);
         if (!backingStore.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text) || !backingStore.flush()) {
-            QMessageBox::warning(this, "Save failed", "Could not flush the persistent action log.\n" + backingStore.errorString());
+            QMessageBox::warning(this, "Save failed", "Could not flush " + description + ".\n" + backingStore.errorString());
             return false;
         }
         backingStore.close();
         if (QFile::exists(destination) && !QFile::remove(destination)) {
-            QMessageBox::warning(this, "Save failed", "Could not replace Action Log CSV.\n" + destination);
+            QMessageBox::warning(this, "Save failed", "Could not replace " + description + ".\n" + destination);
             return false;
         }
-        if (!QFile::copy(actionLogPath(), destination)) {
-            QMessageBox::warning(this, "Save failed", "Could not copy Action Log CSV.\n" + destination);
+        if (!QFile::copy(sourcePath, destination)) {
+            QMessageBox::warning(this, "Save failed", "Could not copy " + description + ".\n" + destination);
             return false;
         }
         return true;
@@ -799,6 +869,55 @@ private:
         return competitions;
     }
 
+    void writePlayersBackingStore() {
+        struct PlayerRecord {
+            QString competition;
+            QJsonObject player;
+        };
+
+        QList<PlayerRecord> players;
+        QSet<QString> profileColumns;
+        for (const auto& competitionValue : playersJson()) {
+            const auto competition = competitionValue.toObject();
+            const auto competitionName = competition.value("competition_name").toString();
+            for (const auto& playerValue : competition.value("table_players").toArray()) {
+                const auto player = playerValue.toObject();
+                const auto profile = player.value("profile").toObject();
+                for (auto it = profile.begin(); it != profile.end(); ++it) profileColumns.insert(it.key());
+                players.append({competitionName, player});
+            }
+        }
+
+        auto sortedProfileColumns = profileColumns.values();
+        std::sort(sortedProfileColumns.begin(), sortedProfileColumns.end(), [](const auto& left, const auto& right) {
+            return QString::compare(left, right, Qt::CaseInsensitive) < 0;
+        });
+        QString csv = playersCsvHeader(sortedProfileColumns);
+        for (const auto& record : players) {
+            const auto profile = record.player.value("profile").toObject();
+            QStringList values{record.competition, record.player.value("table").toString(), record.player.value("name").toString(),
+                record.player.value("kind").toString(), record.player.value("type").toString(),
+                QString::number(record.player.value("seat").toInt()), QString::number(record.player.value("stack").toInteger()),
+                QString::number(record.player.value("committed").toInteger()), record.player.value("folded").toBool() ? "true" : "false"};
+            for (const auto& column : sortedProfileColumns) {
+                const auto value = profile.value(column);
+                values.append(value.isDouble() ? QString::number(value.toDouble(), 'g', 16) : value.toString());
+            }
+            for (auto& value : values) value = csvCell(value);
+            csv += values.join(',') + '\n';
+        }
+
+        QFile file(playersCsvPath());
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            log("Error: could not update persistent player log: " + file.errorString());
+            return;
+        }
+        const auto contents = csv.toUtf8();
+        if (file.write(contents) != contents.size() || !file.flush()) {
+            log("Error: could not write persistent player log: " + file.errorString());
+        }
+    }
+
     bool writeFile(const QString& path, const QByteArray& contents, const QString& description) {
         const auto destination = path;
         QFile file(destination);
@@ -840,9 +959,11 @@ private:
             return;
         }
         const QDir folder(folderPath);
-        const auto savedCsv = copyActionLogBackingStore(folder.filePath("actions.csv"));
+        writePlayersBackingStore();
+        const auto savedCsv = copyBackingStore(actionLogPath(), folder.filePath("actions.csv"), "Action Log CSV");
+        const auto savedPlayers = copyBackingStore(playersCsvPath(), folder.filePath("players.csv"), "Player CSV");
         const auto savedJson = saveActionLogJson(folder.filePath("summary.json"));
-        if (savedCsv && savedJson) statusBar()->showMessage("Saved action log to " + folderPath, 5'000);
+        if (savedCsv && savedPlayers && savedJson) statusBar()->showMessage("Saved action log to " + folderPath, 5'000);
     }
 
     void saveTableAsJson(const QString& competitionName, const QString& tableName) {
