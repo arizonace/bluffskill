@@ -186,6 +186,7 @@ public:
     explicit ServerWindow(bluffskill::app_config::Settings settings)
         : house_(pokerBlindSchedule(settings), pokerChipDenominations(settings)), settings_(std::move(settings)) {
         initializeServerLog();
+        initializeActionLogBackingStore();
         connect(&serverLogRotationTimer_, &QTimer::timeout, this, [this] {
             rotateServerLogIfNeeded();
             scheduleServerLogRotation();
@@ -375,6 +376,23 @@ private:
         return QDir(serverLogDirectory()).filePath("server.log");
     }
 
+    [[nodiscard]] static QString actionLogPath() {
+        return QDir(serverLogDirectory()).filePath("actions.log");
+    }
+
+    void initializeActionLogBackingStore() {
+        QDir().mkpath(serverLogDirectory());
+        QFile file(actionLogPath());
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            log("Error: could not initialize persistent action log: " + file.errorString());
+            return;
+        }
+        const auto header = actionLogCsvHeader().toUtf8();
+        if (file.write(header) != header.size() || !file.flush()) {
+            log("Error: could not write persistent action log: " + file.errorString());
+        }
+    }
+
     void initializeServerLog() {
         QDir().mkpath(serverLogDirectory());
         const QFileInfo current(serverLogPath());
@@ -437,6 +455,7 @@ private:
         actionLog_->setRowCount(0);
         actionLogCursors_.clear();
         activeActionLogTableKey_.clear();
+        initializeActionLogBackingStore();
         log("Server action log cleared");
     }
 
@@ -513,6 +532,7 @@ private:
         actionLog_->item(row, playerColumn)->setData(Qt::UserRole + 2, activeActionLogTableName_);
         actionLog_->item(row, playerColumn)->setData(Qt::UserRole + 3, activeActionLogGameName_);
         actionLog_->scrollToItem(actionLog_->item(row, playerColumn), QAbstractItemView::PositionAtBottom);
+        if (!appendActionLogBackingStoreRow(row)) log("Error: could not append action row to persistent action log.");
     }
 
     [[nodiscard]] static QString pokerNotation(bluffskill::cards::Card card) {
@@ -589,6 +609,45 @@ private:
     [[nodiscard]] static QString csvCell(QString value) {
         value.replace('"', "\"\"");
         return '"' + value + '"';
+    }
+
+    [[nodiscard]] static QString actionLogCsvHeader() {
+        return "Index,Timestamp,Game,Round,Street,Player,Kind,Action,Value,Stack,Gain,Pot,Hand,Hole\n";
+    }
+
+    [[nodiscard]] QString actionLogCsvRow(int row, int serializedIndex) const {
+        QString csv = QString::number(serializedIndex);
+        for (int column = timestampColumn; column < actionLog_->columnCount(); ++column) {
+            csv += ',';
+            const auto* item = actionLog_->item(row, column);
+            csv += csvCell(item == nullptr ? QString{} : item->text());
+        }
+        return csv + '\n';
+    }
+
+    bool appendActionLogBackingStoreRow(int row) const {
+        QFile file(actionLogPath());
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) return false;
+        const auto csv = actionLogCsvRow(row, row + 1).toUtf8();
+        return file.write(csv) == csv.size() && file.flush();
+    }
+
+    bool copyActionLogBackingStore(const QString& destination) {
+        QFile backingStore(actionLogPath());
+        if (!backingStore.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text) || !backingStore.flush()) {
+            QMessageBox::warning(this, "Save failed", "Could not flush the persistent action log.\n" + backingStore.errorString());
+            return false;
+        }
+        backingStore.close();
+        if (QFile::exists(destination) && !QFile::remove(destination)) {
+            QMessageBox::warning(this, "Save failed", "Could not replace Action Log CSV.\n" + destination);
+            return false;
+        }
+        if (!QFile::copy(actionLogPath(), destination)) {
+            QMessageBox::warning(this, "Save failed", "Could not copy Action Log CSV.\n" + destination);
+            return false;
+        }
+        return true;
     }
 
     [[nodiscard]] static QString withSuffix(QString path, const QString& suffix) {
@@ -757,18 +816,12 @@ private:
     }
 
     bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
-        QString csv = "Index,Timestamp,Game,Round,Street,Player,Kind,Action,Value,Stack,Gain,Pot,Hand,Hole\n";
+        QString csv = actionLogCsvHeader();
         int serializedIndex = 1;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
             const auto* player = actionLog_->item(row, playerColumn);
             if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
-            csv += QString::number(serializedIndex++);
-            for (int column = timestampColumn; column < actionLog_->columnCount(); ++column) {
-                csv += ',';
-                const auto* item = actionLog_->item(row, column);
-                csv += csvCell(item == nullptr ? QString{} : item->text());
-            }
-            csv += '\n';
+            csv += actionLogCsvRow(row, serializedIndex++);
         }
         return writeFile(withSuffix(path, "csv"), csv.toUtf8(), "Action Log CSV");
     }
@@ -787,7 +840,7 @@ private:
             return;
         }
         const QDir folder(folderPath);
-        const auto savedCsv = saveActionLogCsv(folder.filePath("actions.csv"));
+        const auto savedCsv = copyActionLogBackingStore(folder.filePath("actions.csv"));
         const auto savedJson = saveActionLogJson(folder.filePath("summary.json"));
         if (savedCsv && savedJson) statusBar()->showMessage("Saved action log to " + folderPath, 5'000);
     }

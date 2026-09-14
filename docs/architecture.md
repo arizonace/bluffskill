@@ -38,7 +38,7 @@ Reference players are in-process `ReferencePlayerController` implementations. Th
 
 Use a monotonically increasing `eventSequence` per competition. A command carries the expected sequence; the server rejects a stale command with `409 Conflict`. Persist an append-only game-event journal plus periodic snapshots. On recovery, load a snapshot and replay later events. This makes bot evaluation and debugging reproducible when the shuffle seed is recorded in development only (never expose it through an API).
 
-For the first playable slice, serialize only at clean hand boundaries. Mid-hand recovery is a follow-up milestone because it requires persisting the exact deck order, current turn, pending obligations, action history, and all pot eligibility.
+For the first playable slice, serialize only at clean hand boundaries. The server also maintains `~/AzoneLayer/BluffSkill/actions.log` as a flushed CSV backing store for the visible action log: it is truncated at server start and when the user clears the log, and is copied as `actions.csv` when an action-log folder is saved. It is an export-recovery aid, not authoritative game-state recovery. Mid-hand recovery remains a follow-up milestone because it requires persisting the exact deck order, current turn, pending obligations, action history, and all pot eligibility.
 
 ## Public and private views
 

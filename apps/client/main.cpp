@@ -1079,6 +1079,9 @@ public:
         restartGameAction_->setEnabled(false);
         connect(restartGameAction_, &QAction::triggered, this, [this] { restartGame(); });
         quitGameAction_ = gameMenu->addAction("Quit Game");
+        // On macOS, Qt's text heuristic otherwise moves a Quit-prefixed action
+        // into the application menu. This is a table command, not app quit.
+        quitGameAction_->setMenuRole(QAction::NoRole);
         quitGameAction_->setEnabled(false);
         connect(quitGameAction_, &QAction::triggered, this, [this] { quitGame(); });
         auto* applicationMenu = menuBar()->addMenu("Application");
