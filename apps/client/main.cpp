@@ -1462,11 +1462,13 @@ private:
         wagerCurrentBet_ = currentBet;
         const auto callAmount = legal.value("callAmount").toInteger();
         wagerExistingCommitment_ = 0;
+        wagerHandCommitted_ = 0;
         if (humanPlayer_) {
             for (const auto& item : view.value("players").toArray()) {
                 const auto player = item.toObject();
                 if (player.value("name").toString() == humanPlayer_->apiPlayerName()) {
                     wagerExistingCommitment_ = player.value("roundCommitted").toInteger();
+                    wagerHandCommitted_ = player.value("committed").toInteger();
                     break;
                 }
             }
@@ -1833,7 +1835,7 @@ private:
         }
         const auto betAmount = amountEdit_->isEnabled() ? wagerAmount() : 0;
         const auto totalCommitment = wagerExistingCommitment_ + betAmount;
-        committedAmount_->setText(QLocale().toString(wagerExistingCommitment_));
+        committedAmount_->setText(QLocale().toString(wagerHandCommitted_));
         totalCommitment_->setText(QLocale().toString(totalCommitment));
         if (raiseAvailable) {
             const auto raiseBy = std::max<qint64>(0, totalCommitment - currentBet);
@@ -2603,6 +2605,7 @@ private:
     qint64 wagerMinimum_{};
     qint64 wagerMaximum_{};
     qint64 wagerExistingCommitment_{};
+    qint64 wagerHandCommitted_{};
     qint64 wagerCurrentBet_{};
     bool wagerRaiseAvailable_{};
     std::vector<QPushButton*> actionButtons_;
