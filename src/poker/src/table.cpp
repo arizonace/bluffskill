@@ -355,7 +355,7 @@ void Table::startHand() {
     for (auto& seat : seats_) {
         if (!seat.folded) seat.holeCards.reserve(2);
     }
-    for (int round = 0; round < 2; ++round) {
+    for (int dealPass = 0; dealPass < 2; ++dealPass) {
         for (auto& seat : seats_) {
             if (seat.folded) continue;
             const auto card = deck_->draw();
@@ -378,7 +378,7 @@ void Table::startHand() {
     if (const auto* actor = nextPendingSeatAfter(big->number)) actingSeat_ = actor->number;
     else advanceStreet();
     ++handsAtCurrentBlindLevel_;
-    ++roundsPlayed_;
+    ++handsPlayed_;
     blindClockStarted_ = true;
     ++eventSequence_;
 }
@@ -420,7 +420,7 @@ void Table::restartGame(std::string gameName) {
     showdownOccurred_ = false;
     blindLevel_ = 0;
     handsAtCurrentBlindLevel_ = 0;
-    roundsPlayed_ = 0;
+    handsPlayed_ = 0;
     blindClockStarted_ = false;
     blindClockPaused_ = false;
     blindLevelStartedAt_ = std::chrono::steady_clock::now();
@@ -430,7 +430,7 @@ void Table::restartGame(std::string gameName) {
 
 TableWinner Table::quitGame() {
     if (gameQuit_) throw std::logic_error("the game has already ended");
-    if (roundsPlayed_ == 0) throw std::logic_error("the game has not started");
+    if (handsPlayed_ == 0) throw std::logic_error("the game has not started");
     if (seats_.empty()) throw std::logic_error("the table has no players");
 
     const auto chipsFor = [this](const Seat& seat) {
@@ -453,7 +453,7 @@ TableWinner Table::quitGame() {
 }
 
 bool Table::isGameInProgress() const {
-    if (roundsPlayed_ == 0 || gameQuit_) return false;
+    if (handsPlayed_ == 0 || gameQuit_) return false;
     return std::count_if(seats_.begin(), seats_.end(), [](const Seat& seat) { return seat.stack > 0; }) > 1;
 }
 
@@ -536,7 +536,7 @@ std::vector<PotView> Table::pots() const {
 TableView Table::viewFor(std::string_view viewerName) const {
     TableView view{.name = name_, .gameName = gameName_, .eventSequence = eventSequence_, .street = street_, .startingStack = startingStack_, .currentBet = currentBet_,
         .smallBlind = smallBlindAmount(), .bigBlind = bigBlindAmount(), .chipDenominations = chipDenominations_,
-        .blindLevel = blindLevel_, .roundsPlayed = roundsPlayed_, .dealerSeat = dealerSeat_,
+        .blindLevel = blindLevel_, .handsPlayed = handsPlayed_, .dealerSeat = dealerSeat_,
         .smallBlindSeat = smallBlindSeat_, .bigBlindSeat = bigBlindSeat_, .actingSeat = actingSeat_, .communityCards = communityCards_,
         .pots = pots(), .payouts = payouts_, .showdownOccurred = showdownOccurred_, .actionHistory = history_};
     const auto* viewer = seatFor(viewerName);

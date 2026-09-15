@@ -118,7 +118,7 @@ struct TableView {
     Chips bigBlind{0};
     ChipDenominations chipDenominations;
     std::size_t blindLevel{0};
-    std::size_t roundsPlayed{0};
+    std::size_t handsPlayed{0};
     std::optional<std::size_t> dealerSeat;
     std::optional<std::size_t> smallBlindSeat;
     std::optional<std::size_t> bigBlindSeat;
@@ -194,7 +194,7 @@ private:
     BlindSchedule blindSchedule_;
     std::size_t blindLevel_{0};
     std::size_t handsAtCurrentBlindLevel_{0};
-    std::size_t roundsPlayed_{0};
+    std::size_t handsPlayed_{0};
     bool blindClockStarted_{false};
     bool blindClockPaused_{false};
     std::chrono::steady_clock::time_point blindLevelStartedAt_{std::chrono::steady_clock::now()};

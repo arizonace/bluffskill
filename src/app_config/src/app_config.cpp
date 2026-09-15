@@ -38,7 +38,12 @@ Settings normalized(Settings settings) {
         for (const auto denomination : defaultChipDenominations) denominations.append(denomination);
     }
     settings.chipDenominations = denominations;
-    settings.serverActionLogVisibleColumns.replaceInStrings(QStringLiteral("Hand"), QStringLiteral("Details"));
+    const auto hasLegacyRound = settings.serverActionLogVisibleColumns.contains(QStringLiteral("Round"));
+    if (hasLegacyRound && settings.serverActionLogVisibleColumns.contains(QStringLiteral("Hand"))
+        && !settings.serverActionLogVisibleColumns.contains(QStringLiteral("Details"))) {
+        settings.serverActionLogVisibleColumns.replaceInStrings(QStringLiteral("Hand"), QStringLiteral("Details"));
+    }
+    settings.serverActionLogVisibleColumns.replaceInStrings(QStringLiteral("Round"), QStringLiteral("Hand"));
     settings.serverActionLogVisibleColumns.removeDuplicates();
     settings.defaultPlayerName = settings.defaultPlayerName.trimmed();
     if (settings.defaultPlayerName.isEmpty()) settings.defaultPlayerName = "Player";

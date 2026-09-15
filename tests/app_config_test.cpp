@@ -22,9 +22,9 @@ int main() {
 
     assert(settings.serverActionLogVisibleColumns.contains("Timestamp"));
     assert(settings.serverActionLogVisibleColumns.contains("Game"));
-    assert(settings.serverActionLogVisibleColumns.contains("Round"));
+    assert(settings.serverActionLogVisibleColumns.contains("Hand"));
+    assert(!settings.serverActionLogVisibleColumns.contains("Round"));
     assert(settings.serverActionLogVisibleColumns.contains("Details"));
-    assert(!settings.serverActionLogVisibleColumns.contains("Hand"));
     assert(!settings.serverActionLogVisibleColumns.contains("Index"));
     assert(!settings.serverActionLogVisibleColumns.contains("Hole"));
 

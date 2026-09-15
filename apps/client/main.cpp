@@ -964,10 +964,10 @@ public:
         bigBlindAmount_->setText("—");
         dealRow->addWidget(bigBlindAmount_);
         dealRow->addSpacing(20);
-        dealRow->addWidget(new QLabel("Rounds Played:", connection));
-        roundsPlayed_ = readOnlyField("9,999");
-        roundsPlayed_->setText("—");
-        dealRow->addWidget(roundsPlayed_);
+        dealRow->addWidget(new QLabel("Hands Played:", connection));
+        handsPlayed_ = readOnlyField("9,999");
+        handsPlayed_->setText("—");
+        dealRow->addWidget(handsPlayed_);
         dealRow->addSpacing(20);
         dealRow->addWidget(new QLabel("Next Deal In", connection));
         nextDealIn_ = readOnlyField("3,600");
@@ -1475,7 +1475,7 @@ private:
         }
         smallBlindAmount_->setText(QLocale().toString(view.value("smallBlind").toInteger()));
         bigBlindAmount_->setText(QLocale().toString(view.value("bigBlind").toInteger()));
-        roundsPlayed_->setText(QLocale().toString(view.value("roundsPlayed").toInteger()));
+        handsPlayed_->setText(QLocale().toString(view.value("handsPlayed").toInteger()));
         bool anyAction = false;
         for (auto* button : actionButtons_) {
             const auto actionName = button->property("actionName").toString();
@@ -2027,11 +2027,9 @@ private:
 
     void beginTurnCountdown(const QJsonObject& legal) {
         const auto canCheck = legal.value("check").toBool();
-        const auto canCall = legal.value("call").toBool();
         const auto canFold = legal.value("fold").toBool();
         if (turnSequence_ == tableSequence_) {
             turnCanCheck_ = canCheck;
-            turnCanCall_ = canCall;
             turnCanFold_ = canFold;
             setActionClockVisible(true);
             return;
@@ -2039,7 +2037,6 @@ private:
         turnSequence_ = tableSequence_;
         turnSeconds_ = settings_.playerClockSeconds;
         turnCanCheck_ = canCheck;
-        turnCanCall_ = canCall;
         turnCanFold_ = canFold;
         turnCountdownTimer_.start(1'000);
         setActionClockVisible(true);
@@ -2052,7 +2049,6 @@ private:
         turnSequence_ = -1;
         turnSeconds_ = 0;
         turnCanCheck_ = false;
-        turnCanCall_ = false;
         turnCanFold_ = false;
         setActionClockVisible(false);
         setActionDetailsVisible(false);
@@ -2443,14 +2439,14 @@ private:
     void selectHumanAction(const char* actionName, bool confirmFold = true) {
         if (!humanPlayer_ || automatedActionTimer_.isActive() || !automatedActionQueue_.isEmpty()) return;
         const auto action = QString::fromUtf8(actionName);
-        if (action == "Fold" && confirmFold && (turnCanCheck_ || turnCanCall_)) {
+        if (action == "Fold" && confirmFold && turnCanCheck_) {
             const auto countdownWasRunning = turnCountdownTimer_.isActive();
             turnCountdownTimer_.stop();
             QMessageBox confirmation(this);
             confirmation.setWindowTitle("Fold hand?");
             confirmation.setIcon(QMessageBox::Warning);
             confirmation.setText("Are you sure you want to fold this hand?");
-            confirmation.setInformativeText(turnCanCheck_ ? "You can check without adding chips." : "You can call and remain in the hand.");
+            confirmation.setInformativeText("You can check without adding chips.");
             auto* fold = confirmation.addButton("Fold", QMessageBox::DestructiveRole);
             confirmation.addButton(QMessageBox::Cancel);
             confirmation.setDefaultButton(QMessageBox::Cancel);
@@ -2536,7 +2532,7 @@ private:
         raiseSummary_->clear();
         smallBlindAmount_->setText("—");
         bigBlindAmount_->setText("—");
-        roundsPlayed_->setText("—");
+        handsPlayed_->setText("—");
     }
 
 private:
@@ -2583,7 +2579,6 @@ private:
     bool autoConnectInProgress_{};
     bool tableComplete_{};
     bool turnCanCheck_{};
-    bool turnCanCall_{};
     bool turnCanFold_{};
     bool presentFinalAutomatedActions_{};
     bool nextDealUsesUninterruptedDelay_{};
@@ -2611,7 +2606,7 @@ private:
     QLabel* remainingPlayersCaption_{};
     QLineEdit* smallBlindAmount_{};
     QLineEdit* bigBlindAmount_{};
-    QLineEdit* roundsPlayed_{};
+    QLineEdit* handsPlayed_{};
     QLineEdit* nextDealIn_{};
     QPushButton* dealNowButton_{};
     PokerTable* pokerTable_{};
