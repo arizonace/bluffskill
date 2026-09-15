@@ -1517,6 +1517,9 @@ private:
             return;
         }
         const auto handFinished = view.value("street").toString() == "Showdown";
+        const auto humanBusted = humanPlayerBusted(view);
+        const auto humanJustBusted = humanBusted && humanPlayerHadChips_;
+        if (humanPlayer_ && !humanBusted) humanPlayerHadChips_ = true;
         if (handFinished) {
             stopTurnCountdown();
             if (tableComplete_) {
@@ -1530,13 +1533,13 @@ private:
                 statusBar()->showMessage("Table winner: " + tableWinner + ". The game is complete. Choose Game → Restart Game to play again.");
                 return;
             }
-            const auto dealerDelayMilliseconds = !humanPlayer_
-                ? settings_.uninterruptedDealerDelayMilliseconds
-                : humanPlayerBusted(view) ? settings_.uninterruptedDealerDelayMilliseconds
-                : settings_.dealClockSeconds * 1'000;
+            const auto uninterruptedDelay = !humanPlayer_ || (humanBusted && !humanJustBusted);
+            const auto dealerDelayMilliseconds = uninterruptedDelay
+                ? settings_.uninterruptedDealerDelayMilliseconds : settings_.dealClockSeconds * 1'000;
             if (lastShowdownSequence_ != tableSequence_) {
                 lastShowdownSequence_ = tableSequence_;
-                beginNextDealCountdown(dealerDelayMilliseconds, !humanPlayer_ || humanPlayerBusted(view));
+                beginNextDealCountdown(dealerDelayMilliseconds, uninterruptedDelay);
+                if (humanJustBusted) humanPlayerHadChips_ = false;
             }
         } else {
             stopNextDealCountdown();
@@ -2525,6 +2528,7 @@ private:
         automatedActionQueue_.clear();
         automatedActionTimer_.stop();
         presentFinalAutomatedActions_ = false;
+        humanPlayerHadChips_ = false;
         pokerTable_->clearActionBoxes();
         tableComplete_ = false;
         remainingPlayersCaption_->setText("Remaining Players:");
@@ -2586,6 +2590,7 @@ private:
     bool turnCanCheck_{};
     bool turnCanFold_{};
     bool presentFinalAutomatedActions_{};
+    bool humanPlayerHadChips_{};
     bool nextDealUsesUninterruptedDelay_{};
     int automatedActionWaitedMilliseconds_{};
     int automatedRestartWaitedMilliseconds_{};
