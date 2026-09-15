@@ -2354,16 +2354,21 @@ private:
     }
 
     [[nodiscard]] static QVector<QString> randomReferencePlayerTypes(int count) {
+        constexpr std::array coreTypes{"Leo", "Virgo", "Libra"};
         QVector<QString> types;
         types.reserve(count);
         for (int index = 0; index < count; ++index) {
-            types.append(QRandomGenerator::global()->bounded(2) == 0 ? "Leo" : "Virgo");
+            const auto selection = QRandomGenerator::global()->bounded(100);
+            types.append(selection < 30 ? "Leo" : selection < 60 ? "Virgo" : selection < 90 ? "Libra"
+                : selection < 95 ? "August Leo" : "August Virgo");
         }
-        if (count > 1) {
-            const auto hasLeo = std::ranges::any_of(types, [](const QString& type) { return type == "Leo"; });
-            const auto hasVirgo = std::ranges::any_of(types, [](const QString& type) { return type == "Virgo"; });
-            if (!hasLeo) types[QRandomGenerator::global()->bounded(count)] = "Leo";
-            if (!hasVirgo) types[QRandomGenerator::global()->bounded(count)] = "Virgo";
+        for (const auto& requiredType : coreTypes) {
+            if (std::ranges::find(types, requiredType) != types.end()) continue;
+            const auto replacement = std::ranges::find_if(types, [&types, &coreTypes](const QString& type) {
+                return !std::ranges::any_of(coreTypes, [&type](const char* coreType) { return type == coreType; })
+                    || std::ranges::count(types, type) > 1;
+            });
+            if (replacement != types.end()) *replacement = requiredType;
         }
         return types;
     }
