@@ -180,6 +180,7 @@ public:
         gainColumn,
         potColumn,
         detailsColumn,
+        boardColumn,
         holeColumn,
         actionLogColumnCount,
     };
@@ -200,7 +201,7 @@ public:
         actionLog_ = new QTableWidget(splitter);
         actionLog_->setColumnCount(actionLogColumnCount);
         actionLog_->setHorizontalHeaderLabels(
-            {"Index", "Timestamp", "Game", "Hand", "Street", "Player", "Kind", "Action", "Value", "Stack", "Gain", "Pot", "Details", "Hole"});
+            {"Index", "Timestamp", "Game", "Hand", "Street", "Player", "Kind", "Action", "Value", "Stack", "Gain", "Pot", "Details", "Board", "Hole"});
         actionLog_->setMinimumWidth(1400);
         actionLog_->setColumnWidth(indexColumn, 70);
         actionLog_->setColumnWidth(timestampColumn, 150);
@@ -557,6 +558,7 @@ private:
         actionLog_->setColumnHidden(gainColumn, !visible("Gain"));
         actionLog_->setColumnHidden(potColumn, !visible("Pot"));
         actionLog_->setColumnHidden(detailsColumn, !visible("Details"));
+        actionLog_->setColumnHidden(boardColumn, true);
         actionLog_->setColumnHidden(holeColumn, true);
     }
 
@@ -577,7 +579,7 @@ private:
 
     void appendActionLogRow(const QString& player, const QString& kind, const QString& street, const QString& hand, const QString& action,
         const QString& value = {}, const QString& stack = {}, const QString& gain = {}, const QString& pot = {}, const QString& details = {},
-        const QString& hole = {}) {
+        const QString& hole = {}, const QString& board = {}) {
         const auto row = actionLog_->rowCount();
         actionLog_->insertRow(row);
         const auto qualifiedGame = activeActionLogCompetitionName_ + ':' + activeActionLogGameName_;
@@ -594,6 +596,7 @@ private:
         actionLog_->setItem(row, gainColumn, new QTableWidgetItem(gain));
         actionLog_->setItem(row, potColumn, new QTableWidgetItem(pot));
         actionLog_->setItem(row, detailsColumn, new QTableWidgetItem(details));
+        actionLog_->setItem(row, boardColumn, new QTableWidgetItem(board));
         actionLog_->setItem(row, holeColumn, new QTableWidgetItem(hole));
         actionLog_->item(row, playerColumn)->setData(Qt::UserRole, activeActionLogTableKey_);
         actionLog_->item(row, playerColumn)->setData(Qt::UserRole + 1, activeActionLogCompetitionName_);
@@ -662,17 +665,25 @@ private:
         return pokerNotation(std::move(cards));
     }
 
+    [[nodiscard]] static QString boardCardsForStreet(const bluffskill::poker::TableView& view, bluffskill::poker::Street street) {
+        const auto count = street == bluffskill::poker::Street::flop ? std::size_t{3}
+            : street == bluffskill::poker::Street::turn ? std::size_t{4}
+            : street == bluffskill::poker::Street::river || street == bluffskill::poker::Street::showdown ? std::size_t{5}
+            : std::size_t{0};
+        return communityCards(view, 0, count);
+    }
+
     void appendCommunityCardLogRows(const bluffskill::poker::TableView& view, ActionLogCursor& cursor, std::size_t visibleCards) {
         if (cursor.loggedCommunityCards == 0 && visibleCards >= 3 && view.communityCards.size() >= 3) {
-            appendActionLogRow("Dealer", {}, "Flop", QString::number(view.handsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 0, 3));
+            appendActionLogRow("Dealer", {}, "Flop", QString::number(view.handsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 0, 3), {}, communityCards(view, 0, 3));
             cursor.loggedCommunityCards = 3;
         }
         if (cursor.loggedCommunityCards == 3 && visibleCards >= 4 && view.communityCards.size() >= 4) {
-            appendActionLogRow("Dealer", {}, "Turn", QString::number(view.handsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 3, 1));
+            appendActionLogRow("Dealer", {}, "Turn", QString::number(view.handsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 3, 1), {}, communityCards(view, 0, 4));
             cursor.loggedCommunityCards = 4;
         }
         if (cursor.loggedCommunityCards == 4 && visibleCards >= 5 && view.communityCards.size() >= 5) {
-            appendActionLogRow("Dealer", {}, "River", QString::number(view.handsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 4, 1));
+            appendActionLogRow("Dealer", {}, "River", QString::number(view.handsPlayed), "Reveal", {}, {}, {}, {}, communityCards(view, 4, 1), {}, communityCards(view, 0, 5));
             cursor.loggedCommunityCards = 5;
         }
     }
@@ -694,7 +705,7 @@ private:
     }
 
     [[nodiscard]] static QString actionLogCsvHeader() {
-        return "Index,Timestamp,Game,Hand,Street,Player,Kind,Action,Value,Stack,Gain,Pot,Details,Hole\n";
+        return "Index,Timestamp,Game,Hand,Street,Player,Kind,Action,Value,Stack,Gain,Pot,Details,Board,Hole\n";
     }
 
     [[nodiscard]] static QString playersCsvHeader(const QStringList& profileColumns = {}) {
@@ -703,12 +714,36 @@ private:
         return columns.join(',') + '\n';
     }
 
-    [[nodiscard]] QString actionLogCsvRow(int row, int serializedIndex) const {
+    [[nodiscard]] QString actionLogPlayerHandKey(int row) const {
+        const auto* player = actionLog_->item(row, playerColumn);
+        if (player == nullptr || player->text().isEmpty() || player->text() == "Dealer") return {};
+        const auto* game = actionLog_->item(row, gameColumn);
+        const auto* hand = actionLog_->item(row, handColumn);
+        return player->data(Qt::UserRole).toString() + QChar(0x1f) + (game == nullptr ? QString{} : game->text())
+            + QChar(0x1f) + (hand == nullptr ? QString{} : hand->text()) + QChar(0x1f) + player->text();
+    }
+
+    [[nodiscard]] QHash<QString, QString> savedHoleCards() const {
+        QHash<QString, QString> holeCards;
+        for (int row = 0; row < actionLog_->rowCount(); ++row) {
+            const auto key = actionLogPlayerHandKey(row);
+            const auto* hole = actionLog_->item(row, holeColumn);
+            if (!key.isEmpty() && hole != nullptr && !hole->text().isEmpty()) holeCards.insert(key, hole->text());
+        }
+        return holeCards;
+    }
+
+    [[nodiscard]] QString actionLogCsvRow(int row, int serializedIndex, const QHash<QString, QString>& savedHoleCards = {}) const {
         QString csv = QString::number(serializedIndex);
         for (int column = timestampColumn; column < actionLog_->columnCount(); ++column) {
             csv += ',';
             const auto* item = actionLog_->item(row, column);
-            csv += csvCell(item == nullptr ? QString{} : item->text());
+            auto value = item == nullptr ? QString{} : item->text();
+            if (column == holeColumn) {
+                const auto key = actionLogPlayerHandKey(row);
+                if (!key.isEmpty() && savedHoleCards.contains(key)) value = savedHoleCards.value(key);
+            }
+            csv += csvCell(value);
         }
         return csv + '\n';
     }
@@ -789,6 +824,7 @@ private:
             {"action", actionLog_->item(row, actionColumn)->text()}, {"value", actionLog_->item(row, valueColumn)->text()},
             {"stack", actionLog_->item(row, stackColumn)->text()}, {"gain", actionLog_->item(row, gainColumn)->text()},
             {"pot", actionLog_->item(row, potColumn)->text()}, {"details", actionLog_->item(row, detailsColumn)->text()},
+            {"boardCards", actionLog_->item(row, boardColumn)->text()},
             {"holeCards", actionLog_->item(row, holeColumn)->text()}};
     }
 
@@ -976,11 +1012,12 @@ private:
 
     bool saveActionLogCsv(const QString& path, const QString& tableKey = {}) {
         QString csv = actionLogCsvHeader();
+        const auto holes = savedHoleCards();
         int serializedIndex = 1;
         for (int row = 0; row < actionLog_->rowCount(); ++row) {
             const auto* player = actionLog_->item(row, playerColumn);
             if (player == nullptr || (!tableKey.isEmpty() && player->data(Qt::UserRole).toString() != tableKey)) continue;
-            csv += actionLogCsvRow(row, serializedIndex++);
+            csv += actionLogCsvRow(row, serializedIndex++, holes);
         }
         return writeFile(withSuffix(path, "csv"), csv.toUtf8(), "Action Log CSV");
     }
@@ -999,7 +1036,7 @@ private:
             return;
         }
         const QDir folder(folderPath);
-        const auto savedCsv = copyBackingStore(actionLogPath(), folder.filePath("actions.csv"), "Action Log CSV");
+        const auto savedCsv = saveActionLogCsv(folder.filePath("actions.csv"));
         const auto savedPlayers = copyBackingStore(playersCsvPath(), folder.filePath("players.csv"), "Player CSV");
         const auto savedJson = saveActionLogJson(folder.filePath("summary.json"));
         rememberActionLogExportDirectory(folderPath);
@@ -1180,7 +1217,8 @@ private:
                         ? holeCardsForLog(competition.name, table.name, action.player) : QString{};
                     appendActionLogRow(QString::fromStdString(action.player), kindFor(action.player), QString::fromUtf8(bluffskill::poker::toString(action.street)),
                         hand, QString::fromUtf8(bluffskill::poker::toString(action.action)), value, QLocale().toString(action.stackAfter), gain,
-                        QLocale().toString(action.potAfter), actionAnnotations(view, static_cast<std::size_t>(index)), holeCards);
+                        QLocale().toString(action.potAfter), actionAnnotations(view, static_cast<std::size_t>(index)), holeCards,
+                        boardCardsForStreet(view, action.street));
                 }
                 appendCommunityCardLogRows(view, cursor, view.communityCards.size());
                 if (view.street == bluffskill::poker::Street::showdown) {
@@ -1200,7 +1238,8 @@ private:
                             const auto action = index == 0 ? QStringLiteral("Main Pot")
                                 : QStringLiteral("Side Pot %1").arg(index);
                             appendActionLogRow("Dealer", {}, payoutStreet, hand, action, {}, {}, {},
-                                QLocale().toString(static_cast<qint64>(payout.amount)), payoutRecipients(view, payout));
+                                QLocale().toString(static_cast<qint64>(payout.amount)), payoutRecipients(view, payout), {},
+                                boardCardsForStreet(view, bluffskill::poker::Street::showdown));
                         }
                         cursor.loggedPayouts = true;
                     }
@@ -1211,7 +1250,8 @@ private:
                             if (winnings > 0 && !cursor.loggedPotWinnerSeats.contains(seat)) {
                                 const auto netGain = winnings - static_cast<qint64>(player.committed);
                                 appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", hand, "Pot Won", QLocale().toString(potValue),
-                                    QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue), showdownDetails(player), pokerNotation(player.holeCards));
+                                    QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue), showdownDetails(player), pokerNotation(player.holeCards),
+                                    boardCardsForStreet(view, bluffskill::poker::Street::showdown));
                                 cursor.loggedPotWinnerSeats.insert(seat);
                                 cursor.loggedShowdownHandSeats.insert(seat);
                             }
@@ -1226,7 +1266,7 @@ private:
                             const auto netGain = winnings - static_cast<qint64>(player.committed);
                             appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), foldedStreet, hand, "Pot Folded", QLocale().toString(potValue),
                                 QLocale().toString(player.stack), netValue(netGain), QLocale().toString(potValue), {},
-                                holeCardsForLog(competition.name, table.name, player.name));
+                                holeCardsForLog(competition.name, table.name, player.name), boardCardsForStreet(view, bluffskill::poker::Street::showdown));
                             cursor.loggedFoldedPot = true;
                             break;
                         }
@@ -1236,7 +1276,8 @@ private:
                         if (player.stack == 0 && cursor.handStartingStacks.value(seat) > 0 && !cursor.loggedBustedSeats.contains(seat)) {
                             const auto lost = committedThroughAction(view, player.seat, view.actionHistory.size()) - winningsBySeat.value(seat);
                             appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", hand, "Busted Out", {}, QLocale().toString(player.stack),
-                                lostValue(lost), QLocale().toString(potValue), showdownDetails(player), pokerNotation(player.holeCards));
+                                lostValue(lost), QLocale().toString(potValue), showdownDetails(player), pokerNotation(player.holeCards),
+                                boardCardsForStreet(view, bluffskill::poker::Street::showdown));
                             cursor.loggedBustedSeats.insert(seat);
                             if (view.showdownOccurred) cursor.loggedShowdownHandSeats.insert(seat);
                         }
@@ -1247,7 +1288,8 @@ private:
                             if (player.folded || cursor.loggedShowdownHandSeats.contains(seat)) continue;
                             const auto lost = committedThroughAction(view, player.seat, view.actionHistory.size()) - winningsBySeat.value(seat);
                             appendActionLogRow(QString::fromStdString(player.name), kindFor(player.name), "Showdown", hand, "Lost", {}, QLocale().toString(player.stack),
-                                lostValue(lost), QLocale().toString(potValue), showdownDetails(player), pokerNotation(player.holeCards));
+                                lostValue(lost), QLocale().toString(potValue), showdownDetails(player), pokerNotation(player.holeCards),
+                                boardCardsForStreet(view, bluffskill::poker::Street::showdown));
                             cursor.loggedShowdownHandSeats.insert(seat);
                         }
                     }
