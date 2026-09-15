@@ -1044,7 +1044,7 @@ public:
         amountColumn->addLayout(amountRow);
         auto* committedRow = new QHBoxLayout;
         committedRow->setContentsMargins(0, 0, 0, 0);
-        committedRow->addWidget(new QLabel("Committed", actions));
+        committedRow->addWidget(new QLabel("In Pot", actions));
         committedAmount_ = new QLineEdit(actions);
         committedAmount_->setReadOnly(true);
         committedAmount_->setFocusPolicy(Qt::NoFocus);
@@ -1488,6 +1488,8 @@ private:
         const auto minimum = legal.value("minimumAmount").toInteger();
         const auto maximum = legal.value("maximumAmount").toInteger();
         const auto canSetAmount = humanPlayer_ && (legal.value("bet").toBool() || legal.value("raise").toBool()) && maximum >= minimum;
+        wagerBetAvailable_ = canSetAmount && legal.value("bet").toBool();
+        wagerRaiseAvailable_ = canSetAmount && legal.value("raise").toBool();
         wagerMinimum_ = std::max<qint64>(0, minimum - wagerExistingCommitment_);
         wagerMaximum_ = std::max<qint64>(0, maximum - wagerExistingCommitment_);
         qint64 localStack = 0;
@@ -1507,7 +1509,7 @@ private:
         } else {
             amountEdit_->clear();
         }
-        updateWagerSummary(legal.value("raise").toBool() && canSetAmount, currentBet);
+        updateWagerSummary(wagerRaiseAvailable_, currentBet);
         if (presentingAutomatedActions) {
             stopTurnCountdown();
             setActionControlsEnabled(false);
@@ -1831,12 +1833,14 @@ private:
             committedAmount_->setText("—");
             totalCommitment_->setText("—");
             raiseSummary_->clear();
+            setWagerActionButtonsEnabled(false);
             return;
         }
         const auto betAmount = amountEdit_->isEnabled() ? wagerAmount() : 0;
         const auto totalCommitment = wagerExistingCommitment_ + betAmount;
         committedAmount_->setText(QLocale().toString(wagerHandCommitted_));
         totalCommitment_->setText(QLocale().toString(totalCommitment));
+        setWagerActionButtonsEnabled(betAmount >= wagerMinimum_ && betAmount <= wagerMaximum_);
         if (raiseAvailable) {
             const auto raiseBy = std::max<qint64>(0, totalCommitment - currentBet);
             raiseSummary_->setText("Raise by " + QLocale().toString(raiseBy) + " / Raise to " + QLocale().toString(totalCommitment));
@@ -1853,6 +1857,14 @@ private:
     void adjustWagerAmount(qint64 adjustment) {
         if (!amountEdit_->isEnabled()) return;
         setWagerAmount(wagerAmount() + adjustment);
+    }
+
+    void setWagerActionButtonsEnabled(bool amountIsLegal) {
+        for (auto* button : actionButtons_) {
+            const auto actionName = button->property("actionName").toString();
+            if (actionName == "bet") button->setEnabled(wagerBetAvailable_ && amountIsLegal);
+            else if (actionName == "raise") button->setEnabled(wagerRaiseAvailable_ && amountIsLegal);
+        }
     }
 
     void setChipDenominations(const QJsonArray& values) {
@@ -1913,8 +1925,9 @@ private:
             auto* down = new QToolButton(controls);
             down->setText("▼");
             down->setAccessibleName(label + " amount down: " + QLocale().toString(amount));
-            auto* amountLabel = new QLabel(label + "\n" + QLocale().toString(amount), controls);
+            auto* amountLabel = new QLabel(QLocale().toString(amount), controls);
             amountLabel->setAlignment(Qt::AlignHCenter);
+            amountLabel->setAccessibleName(label + " amount: " + QLocale().toString(amount));
             connect(up, &QToolButton::clicked, this, [this, amount] { adjustWagerAmount(amount); });
             connect(down, &QToolButton::clicked, this, [this, amount] { adjustWagerAmount(-amount); });
             controlsLayout->addWidget(up, 0, Qt::AlignHCenter);
@@ -1927,13 +1940,13 @@ private:
     }
 
     [[nodiscard]] qint64 normalizedWagerAmount(qint64 amount) const {
-        if (wagerMaximum_ < wagerMinimum_) return 0;
-        const auto bounded = std::max(amount, wagerMinimum_);
-        if (chipDenominations_.isEmpty()) return std::clamp(bounded, wagerMinimum_, wagerMaximum_);
+        if (wagerMaximum_ < 0) return 0;
+        const auto bounded = std::clamp(amount, qint64{0}, wagerMaximum_);
+        if (chipDenominations_.isEmpty()) return bounded;
         const auto unit = chipDenominations_.front();
         const auto roundedUp = ((bounded + unit - 1) / unit) * unit;
         const auto maximumChipValue = (wagerMaximum_ / unit) * unit;
-        return std::clamp(std::min(roundedUp, maximumChipValue), wagerMinimum_, maximumChipValue);
+        return std::min(roundedUp, maximumChipValue);
     }
 
     void applyUpdatedPresentationDelays(const bluffskill::app_config::Settings& previous) {
@@ -2014,9 +2027,11 @@ private:
 
     void beginTurnCountdown(const QJsonObject& legal) {
         const auto canCheck = legal.value("check").toBool();
+        const auto canCall = legal.value("call").toBool();
         const auto canFold = legal.value("fold").toBool();
         if (turnSequence_ == tableSequence_) {
             turnCanCheck_ = canCheck;
+            turnCanCall_ = canCall;
             turnCanFold_ = canFold;
             setActionClockVisible(true);
             return;
@@ -2024,6 +2039,7 @@ private:
         turnSequence_ = tableSequence_;
         turnSeconds_ = settings_.playerClockSeconds;
         turnCanCheck_ = canCheck;
+        turnCanCall_ = canCall;
         turnCanFold_ = canFold;
         turnCountdownTimer_.start(1'000);
         setActionClockVisible(true);
@@ -2036,6 +2052,7 @@ private:
         turnSequence_ = -1;
         turnSeconds_ = 0;
         turnCanCheck_ = false;
+        turnCanCall_ = false;
         turnCanFold_ = false;
         setActionClockVisible(false);
         setActionDetailsVisible(false);
@@ -2112,7 +2129,7 @@ private:
         }
         turnCountdownTimer_.stop();
         if (turnCanCheck_) selectHumanAction("Check");
-        else if (turnCanFold_) selectHumanAction("Fold");
+        else if (turnCanFold_) selectHumanAction("Fold", false);
         else refreshTableView();
     }
 
@@ -2423,10 +2440,27 @@ private:
         });
     }
 
-    void selectHumanAction(const char* actionName) {
+    void selectHumanAction(const char* actionName, bool confirmFold = true) {
         if (!humanPlayer_ || automatedActionTimer_.isActive() || !automatedActionQueue_.isEmpty()) return;
-        stopTurnCountdown();
         const auto action = QString::fromUtf8(actionName);
+        if (action == "Fold" && confirmFold && (turnCanCheck_ || turnCanCall_)) {
+            const auto countdownWasRunning = turnCountdownTimer_.isActive();
+            turnCountdownTimer_.stop();
+            QMessageBox confirmation(this);
+            confirmation.setWindowTitle("Fold hand?");
+            confirmation.setIcon(QMessageBox::Warning);
+            confirmation.setText("Are you sure you want to fold this hand?");
+            confirmation.setInformativeText(turnCanCheck_ ? "You can check without adding chips." : "You can call and remain in the hand.");
+            auto* fold = confirmation.addButton("Fold", QMessageBox::DestructiveRole);
+            confirmation.addButton(QMessageBox::Cancel);
+            confirmation.setDefaultButton(QMessageBox::Cancel);
+            confirmation.exec();
+            if (confirmation.clickedButton() != fold) {
+                if (countdownWasRunning && turnSequence_ == tableSequence_) turnCountdownTimer_.start(1'000);
+                return;
+            }
+        }
+        stopTurnCountdown();
         const auto humanAction = action == "Check" ? bluffskill::client::HumanAction::check
             : action == "Call" ? bluffskill::client::HumanAction::call
             : action == "Bet" ? bluffskill::client::HumanAction::bet
@@ -2549,6 +2583,7 @@ private:
     bool autoConnectInProgress_{};
     bool tableComplete_{};
     bool turnCanCheck_{};
+    bool turnCanCall_{};
     bool turnCanFold_{};
     bool presentFinalAutomatedActions_{};
     bool nextDealUsesUninterruptedDelay_{};
@@ -2607,6 +2642,7 @@ private:
     qint64 wagerExistingCommitment_{};
     qint64 wagerHandCommitted_{};
     qint64 wagerCurrentBet_{};
+    bool wagerBetAvailable_{};
     bool wagerRaiseAvailable_{};
     std::vector<QPushButton*> actionButtons_;
     QAction* disconnectAction_{};

@@ -38,6 +38,8 @@ Settings normalized(Settings settings) {
         for (const auto denomination : defaultChipDenominations) denominations.append(denomination);
     }
     settings.chipDenominations = denominations;
+    settings.serverActionLogVisibleColumns.replaceInStrings(QStringLiteral("Hand"), QStringLiteral("Details"));
+    settings.serverActionLogVisibleColumns.removeDuplicates();
     settings.defaultPlayerName = settings.defaultPlayerName.trimmed();
     if (settings.defaultPlayerName.isEmpty()) settings.defaultPlayerName = "Player";
 
