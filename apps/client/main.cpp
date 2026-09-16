@@ -35,6 +35,7 @@
 #include <QSet>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QTextBrowser>
 #include <QToolButton>
 #include <QUrl>
 #include <QUrlQuery>
@@ -1083,10 +1084,40 @@ public:
         raiseSummary_ = new QLabel(actions);
         wagerLayout->addWidget(raiseSummary_);
         wagerLayout->addStretch(1);
+        handInsightButton_ = new QPushButton("ⓘ Hand insight", actions);
+        handInsightButton_->setAccessibleName("Show hand insight");
+        handInsightButton_->setToolTip("Show a server-calculated explanation of your current hand");
+        handInsightButton_->setEnabled(false);
+        connect(handInsightButton_, &QPushButton::clicked, this, [this] { toggleHandInsight(); });
+        wagerLayout->addWidget(handInsightButton_);
         localHoleCardsWidget_ = new LocalHoleCardsWidget(actions);
         wagerLayout->addWidget(localHoleCardsWidget_);
         actionLayout->addLayout(wagerLayout);
         layout->addWidget(actions);
+        handInsightPanel_ = new QFrame(central);
+        handInsightPanel_->setFrameShape(QFrame::StyledPanel);
+        handInsightPanel_->setMinimumHeight(170);
+        auto* handInsightLayout = new QVBoxLayout(handInsightPanel_);
+        auto* handInsightHeader = new QHBoxLayout;
+        auto* handInsightTitle = new QLabel("Hand insight · BluffSkill heuristic", handInsightPanel_);
+        handInsightTitle->setStyleSheet("font-weight: 600;");
+        handInsightHeader->addWidget(handInsightTitle);
+        handInsightHeader->addStretch(1);
+        auto* hideHandInsight = new QToolButton(handInsightPanel_);
+        hideHandInsight->setText("Hide");
+        hideHandInsight->setAccessibleName("Hide hand insight");
+        connect(hideHandInsight, &QToolButton::clicked, this, [this] { toggleHandInsight(false); });
+        handInsightHeader->addWidget(hideHandInsight);
+        handInsightLayout->addLayout(handInsightHeader);
+        handInsightContent_ = new QTextBrowser(handInsightPanel_);
+        handInsightContent_->setOpenExternalLinks(false);
+        handInsightContent_->setFrameShape(QFrame::NoFrame);
+        handInsightContent_->setReadOnly(true);
+        handInsightContent_->setMinimumHeight(125);
+        handInsightContent_->setAccessibleName("Hand insight explanation");
+        handInsightLayout->addWidget(handInsightContent_);
+        handInsightPanel_->setVisible(false);
+        layout->addWidget(handInsightPanel_);
         setCentralWidget(central);
         auto* connectionMenu = menuBar()->addMenu("Connection");
         auto* connectAction = connectionMenu->addAction("Connect…");
@@ -1165,6 +1196,104 @@ private:
         if (humanPlayer_) query.addQueryItem("viewer", humanPlayer_->apiPlayerName());
         url.setQuery(query);
         return url;
+    }
+
+    [[nodiscard]] QUrl handInsightUrl() const {
+        auto url = endpointUrl("/v1/competitions/" + competition_->currentText() + "/tables/" + table_->currentText() + "/hand-insight");
+        QUrlQuery query;
+        if (humanPlayer_) query.addQueryItem("viewer", humanPlayer_->apiPlayerName());
+        url.setQuery(query);
+        return url;
+    }
+
+    void toggleHandInsight(bool show = true) {
+        if (!handInsightPanel_ || !handInsightButton_ || !humanPlayer_) return;
+        if (!show) {
+            const auto panelHeight = handInsightPanel_->height();
+            handInsightPanel_->setVisible(false);
+            handInsightButton_->setText("ⓘ Hand insight");
+            handInsightButton_->setAccessibleName("Show hand insight");
+            resize(width(), std::max(minimumHeight(), height() - panelHeight));
+            return;
+        }
+        if (handInsightPanel_->isVisible()) {
+            toggleHandInsight(false);
+            return;
+        }
+        handInsightPanel_->setVisible(true);
+        handInsightButton_->setText("Hide insight");
+        handInsightButton_->setAccessibleName("Hide hand insight");
+        resize(width(), height() + handInsightPanel_->sizeHint().height());
+        refreshHandInsight();
+    }
+
+    [[nodiscard]] static QString percentText(double value) {
+        return QLocale().toString(value * 100.0, 'f', 1) + "%";
+    }
+
+    [[nodiscard]] QString handInsightText(const QJsonObject& insight) const {
+        const auto chips = [](qint64 amount) { return QLocale().toString(amount); };
+        QString text = "<b>" + insight.value("handDescription").toString("Hand unavailable") + "</b> · "
+            + insight.value("position").toString("Position unavailable") + "<br>"
+            + "Stack: " + chips(insight.value("stack").toInteger()) + " ("
+            + QLocale().toString(insight.value("stackBigBlinds").toDouble(), 'f', 1) + " BB) · Pot: "
+            + chips(insight.value("pot").toInteger()) + " · Players: " + QString::number(insight.value("playersInHand").toInt()) + "<br>"
+            + "Signal: " + QString::number(insight.value("strengthSignal").toInt()) + "/100 · Board pressure: "
+            + QString::number(insight.value("boardPressure").toInt()) + "/100";
+        if (insight.contains("requiredPotOdds")) {
+            text += " · Call: " + chips(insight.value("callAmount").toInteger()) + " (needs "
+                + percentText(insight.value("requiredPotOdds").toDouble()) + ")";
+        }
+        const auto outs = insight.value("improvementOuts").toArray();
+        if (!outs.isEmpty()) {
+            QStringList cards;
+            for (const auto& entry : outs) {
+                const auto out = entry.toObject();
+                cards.append(out.value("card").toString());
+            }
+            text += "<br><b>Improvement cards:</b> " + QString::number(outs.size()) + " · "
+                + percentText(insight.value("nextCardChance").toDouble()) + " next card · "
+                + percentText(insight.value("byRiverChance").toDouble()) + " by river<br>"
+                + cards.join(", ") + "<br>Each listed card: "
+                + percentText(outs.first().toObject().value("nextCardChance").toDouble()) + " next card · "
+                + percentText(outs.first().toObject().value("byRiverChance").toDouble()) + " by river";
+        } else {
+            text += "<br><b>Improvement cards:</b> no straight/flush completion cards on this street.";
+        }
+        const auto recommendation = insight.value("recommendation").toObject();
+        if (!recommendation.isEmpty()) {
+            text += "<br><b>Recommendation:</b> " + recommendation.value("action").toString();
+            if (recommendation.contains("amount")) text += " " + chips(recommendation.value("amount").toInteger());
+        }
+        const auto reasons = insight.value("reasons").toArray();
+        if (!reasons.isEmpty()) {
+            QStringList lines;
+            for (const auto& reason : reasons) lines.append("• " + reason.toString().toHtmlEscaped());
+            text += "<br><br>" + lines.join("<br>");
+        }
+        return text;
+    }
+
+    void refreshHandInsight() {
+        if (!handInsightPanel_ || !handInsightPanel_->isVisible() || !connected_ || !humanPlayer_
+            || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        const auto attempt = connectionGeneration_;
+        const auto requestGeneration = ++handInsightRequestGeneration_;
+        handInsightContent_->setText("Updating server hand insight…");
+        auto* reply = track(network_.get(QNetworkRequest(handInsightUrl())));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, requestGeneration] {
+            const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto insight = QJsonDocument::fromJson(reply->readAll()).object();
+            const auto success = reply->error() == QNetworkReply::NoError && status == 200;
+            release(reply);
+            if (attempt != connectionGeneration_ || requestGeneration != handInsightRequestGeneration_ || !connected_
+                || !handInsightPanel_->isVisible()) return;
+            if (!success) {
+                handInsightContent_->setText("Hand insight is unavailable for the current table.");
+                return;
+            }
+            handInsightContent_->setHtml(handInsightText(insight));
+        });
     }
 
     void updateBreadcrumb() {
@@ -1484,6 +1613,8 @@ private:
         localHoleCardsWidget_->setCards(view.value("street").toString() == "Showdown" ? QStringList{} : pokerTable_->localHoleCards());
         tableSequence_ = view.value("sequence").toInteger();
         lastStreet_ = view.value("street").toString();
+        handInsightButton_->setEnabled(humanPlayer_ && view.value("street").toString() != "Waiting");
+        if (handInsightPanel_->isVisible()) refreshHandInsight();
         const auto presentingAutomatedActions = deferShowdownForAutomatedActions
             ? false : queueNewActionBoxes(view, previousStreet);
         int remaining = 0;
@@ -2559,6 +2690,13 @@ private:
     }
 
     void clearHumanPlayer() {
+        ++handInsightRequestGeneration_;
+        if (handInsightPanel_ && handInsightPanel_->isVisible()) handInsightPanel_->setVisible(false);
+        if (handInsightButton_) {
+            handInsightButton_->setText("ⓘ Hand insight");
+            handInsightButton_->setAccessibleName("Show hand insight");
+            handInsightButton_->setEnabled(false);
+        }
         pendingHumanPlayer_.reset();
         humanPlayer_.reset();
         pokerTable_->setLocalPlayerName({});
@@ -2671,6 +2809,9 @@ private:
     QPushButton* dealNowButton_{};
     PokerTable* pokerTable_{};
     LocalHoleCardsWidget* localHoleCardsWidget_{};
+    QPushButton* handInsightButton_{};
+    QFrame* handInsightPanel_{};
+    QTextBrowser* handInsightContent_{};
     QLabel* actionClockCaption_{};
     QLineEdit* actionClockValue_{};
     QLabel* callAmountCaption_{};
@@ -2707,6 +2848,7 @@ private:
     QAction* quitGameAction_{};
     std::optional<CustomGameConfiguration> lastCustomGameConfiguration_;
     qsizetype autoConnectPortIndex_{};
+    std::uint64_t handInsightRequestGeneration_{};
     std::unique_ptr<bluffskill::client::HumanPlayer> pendingHumanPlayer_;
     std::unique_ptr<bluffskill::client::HumanPlayer> humanPlayer_;
 };

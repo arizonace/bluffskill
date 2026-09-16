@@ -68,6 +68,7 @@ bluffskill::poker::BlindSchedule pokerBlindSchedule(const bluffskill::app_config
 }
 
 QJsonObject tableViewJson(const bluffskill::poker::TableView& table);
+QJsonObject handInsightJson(const bluffskill::poker::HandInsight& insight);
 
 class SettingsDialog final : public QDialog {
 public:
@@ -1424,6 +1425,33 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
         {"actionHistory", history}, {"legalActions", legalActions}};
 }
 
+QJsonObject handInsightJson(const bluffskill::poker::HandInsight& insight) {
+    QJsonArray improvementOuts;
+    for (const auto& out : insight.improvementOuts) {
+        improvementOuts.append(QJsonObject{{"card", QString::fromStdString(bluffskill::cards::toString(out.card))},
+            {"improvement", QString::fromStdString(out.improvement)}, {"nextCardChance", out.nextCardChance},
+            {"byRiverChance", out.byRiverChance}});
+    }
+    QJsonArray reasons;
+    for (const auto& reason : insight.reasons) reasons.append(QString::fromStdString(reason));
+    QJsonObject recommendation;
+    if (insight.recommendedAction) {
+        recommendation.insert("action", QString::fromUtf8(bluffskill::poker::toString(*insight.recommendedAction)));
+        if (insight.recommendedAmount) recommendation.insert("amount", static_cast<qint64>(*insight.recommendedAmount));
+    }
+    QJsonObject result{{"sequence", static_cast<qint64>(insight.eventSequence)},
+        {"street", QString::fromUtf8(bluffskill::poker::toString(insight.street))},
+        {"handDescription", QString::fromStdString(insight.handDescription)}, {"position", QString::fromStdString(insight.position)},
+        {"stack", static_cast<qint64>(insight.stack)}, {"stackBigBlinds", insight.stackBigBlinds},
+        {"pot", static_cast<qint64>(insight.pot)}, {"callAmount", static_cast<qint64>(insight.callAmount)},
+        {"playersInHand", static_cast<int>(insight.playersInHand)}, {"improvementOuts", improvementOuts},
+        {"nextCardChance", insight.nextCardChance}, {"byRiverChance", insight.byRiverChance},
+        {"strengthSignal", insight.strengthSignal}, {"boardPressure", insight.boardPressure},
+        {"recommendation", recommendation}, {"reasons", reasons}};
+    if (insight.requiredPotOdds) result.insert("requiredPotOdds", *insight.requiredPotOdds);
+    return result;
+}
+
 QHttpServerResponse tableViewResponse(const bluffskill::poker::TableView& table, QHttpServerResponder::StatusCode status = QHttpServerResponder::StatusCode::Ok) {
     QHttpServerResponse response(tableViewJson(table), status);
     auto headers = response.headers();
@@ -1522,6 +1550,28 @@ int main(int argc, char* argv[]) {
             } catch (const std::exception& exception) {
                 return window.jsonResponse("GET /v1/competitions/" + competitionName + "/tables/" + tableName + "/view → 404",
                     QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::NotFound);
+            }
+        });
+
+    server.route("/v1/competitions/<arg>/tables/<arg>/hand-insight", [&window](const QString& competitionName, const QString& tableName,
+        const QHttpServerRequest& request) -> QHttpServerResponse {
+            const auto viewerName = QUrlQuery(request.url()).queryItemValue("viewer");
+            if (viewerName.isEmpty()) {
+                return window.jsonResponse("GET /v1/competitions/" + competitionName + "/tables/" + tableName + "/hand-insight → 400",
+                    QJsonObject{{"error", "viewer is required"}}, QHttpServerResponder::StatusCode::BadRequest);
+            }
+            try {
+                const auto insight = window.house().handInsight(competitionName.toStdString(), tableName.toStdString(), viewerName.toStdString());
+                const auto json = handInsightJson(insight);
+                window.logResponseJson("GET /v1/competitions/" + competitionName + "/tables/" + tableName + "/hand-insight → 200", json);
+                QHttpServerResponse response(json);
+                auto headers = response.headers();
+                headers.append("X-BluffSkill-Sequence", QString::number(insight.eventSequence));
+                response.setHeaders(std::move(headers));
+                return response;
+            } catch (const std::exception& exception) {
+                return window.jsonResponse("GET /v1/competitions/" + competitionName + "/tables/" + tableName + "/hand-insight → 400",
+                    QJsonObject{{"error", exception.what()}}, QHttpServerResponder::StatusCode::BadRequest);
             }
         });
 

@@ -42,6 +42,19 @@ int main() {
     assert(aliceView.players.front().holeCards.size() == 2);
     assert(aliceView.legalActions && aliceView.legalActions->call);
     assert(!aliceView.legalActions->check);
+    const auto aliceInsight = table.handInsightFor("Alice");
+    assert(aliceInsight.eventSequence == aliceView.eventSequence);
+    assert(aliceInsight.stack == 50);
+    assert(aliceInsight.pot == 75);
+    assert(aliceInsight.playersInHand == 3);
+    assert(!aliceInsight.handDescription.empty());
+    assert(aliceInsight.strengthSignal >= 0 && aliceInsight.strengthSignal <= 100);
+    assert(!aliceInsight.reasons.empty());
+    try {
+        [[maybe_unused]] const auto publicInsight = table.handInsightFor({});
+        assert(false && "hand insight must require a private viewer");
+    } catch (const std::invalid_argument&) {
+    }
 
     try {
         table.submitAction("Alice", Action::check, 0, aliceView.eventSequence);

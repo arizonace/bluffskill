@@ -411,6 +411,12 @@ TableView House::tableView(std::string_view competitionName, std::string_view ta
     return findTable(*competition, tableName).viewFor(viewerName);
 }
 
+HandInsight House::handInsight(std::string_view competitionName, std::string_view tableName, std::string_view viewerName) const {
+    const auto* competition = findCompetition(competitionName);
+    if (competition == nullptr) throw std::invalid_argument("competition was not found");
+    return findTable(*competition, tableName).handInsightFor(viewerName);
+}
+
 std::optional<ReferencePlayerInspection> House::referencePlayerInspection(
     std::string_view competitionName, std::string_view tableName, std::string_view playerName) const {
     const auto* competition = findCompetition(competitionName);

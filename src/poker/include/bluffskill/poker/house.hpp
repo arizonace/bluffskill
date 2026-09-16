@@ -59,6 +59,7 @@ public:
     // list rather than carrying their own type list.
     [[nodiscard]] std::vector<ReferencePlayerType> referencePlayerTypes() const;
     [[nodiscard]] TableView tableView(std::string_view competitionName, std::string_view tableName, std::string_view viewerName = {}) const;
+    [[nodiscard]] HandInsight handInsight(std::string_view competitionName, std::string_view tableName, std::string_view viewerName) const;
     // Server-console inspection only. REST adapters must never project bot profiles.
     [[nodiscard]] std::optional<ReferencePlayerInspection> referencePlayerInspection(
         std::string_view competitionName, std::string_view tableName, std::string_view playerName) const;

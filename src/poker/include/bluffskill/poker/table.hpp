@@ -135,6 +135,38 @@ struct TableView {
     std::optional<LegalActions> legalActions; // Available only to the viewer who is acting.
 };
 
+// A viewer-specific explanation produced by the engine from the same private
+// table projection used to decide what information the player may see. It is
+// intentionally a transparent heuristic, not an equity calculation or a GTO
+// solver result.
+struct HandInsightOut {
+    cards::Card card;
+    std::string improvement;
+    double nextCardChance{0.0};
+    double byRiverChance{0.0};
+};
+
+struct HandInsight {
+    std::uint64_t eventSequence{0};
+    Street street{Street::waiting};
+    std::string handDescription;
+    std::string position;
+    Chips stack{0};
+    double stackBigBlinds{0.0};
+    Chips pot{0};
+    Chips callAmount{0};
+    std::optional<double> requiredPotOdds;
+    std::size_t playersInHand{0};
+    std::vector<HandInsightOut> improvementOuts;
+    double nextCardChance{0.0};
+    double byRiverChance{0.0};
+    int strengthSignal{0}; // 0–100 heuristic signal; never an equity percentage.
+    int boardPressure{0}; // 0–100 public-board caution signal.
+    std::optional<Action> recommendedAction;
+    std::optional<Chips> recommendedAmount;
+    std::vector<std::string> reasons;
+};
+
 [[nodiscard]] std::string_view toString(Street street) noexcept;
 [[nodiscard]] std::string_view toString(Action action) noexcept;
 
@@ -158,6 +190,7 @@ public:
     void pauseBlindClock();
     void resumeBlindClock();
     [[nodiscard]] TableView viewFor(std::string_view viewerName = {}) const;
+    [[nodiscard]] HandInsight handInsightFor(std::string_view viewerName) const;
     [[nodiscard]] std::uint64_t eventSequence() const noexcept { return eventSequence_; }
     void submitAction(std::string_view playerName, Action action, Chips amount, std::uint64_t expectedSequence);
 

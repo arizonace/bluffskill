@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <numeric>
 #include <random>
 #include <ranges>
@@ -129,6 +130,113 @@ std::string describePartialHand(const std::vector<cards::Card>& cards) {
 
 std::string describeAvailableHand(const std::vector<cards::Card>& cards) {
     return cards.size() >= 5 ? describeHand(bestHand(cards)) : describePartialHand(cards);
+}
+
+bool containsCard(const std::vector<cards::Card>& cards, cards::Card candidate) {
+    return std::ranges::find(cards, candidate) != cards.end();
+}
+
+bool completesStraightUsingHoleCard(const std::vector<cards::Card>& cards, const std::vector<cards::Card>& holeCards) {
+    std::array<int, 15> ranks{};
+    for (const auto card : cards) ++ranks[static_cast<int>(card.rank)];
+    const auto holeRankIn = [&holeCards](int high) {
+        return std::ranges::any_of(holeCards, [high](const cards::Card& card) {
+            const auto rank = static_cast<int>(card.rank);
+            return rank <= high && rank > high - 5;
+        });
+    };
+    for (int high = 14; high >= 5; --high) {
+        bool complete = true;
+        for (int rank = high; rank > high - 5; --rank) complete = complete && ranks[rank] > 0;
+        if (complete && holeRankIn(high)) return true;
+    }
+    const auto wheelHoleCard = std::ranges::any_of(holeCards, [](const cards::Card& card) {
+        const auto rank = static_cast<int>(card.rank);
+        return rank == 14 || (rank >= 2 && rank <= 5);
+    });
+    return wheelHoleCard && ranks[14] && ranks[2] && ranks[3] && ranks[4] && ranks[5];
+}
+
+int handStrengthSignal(const std::vector<cards::Card>& cards, const std::vector<cards::Card>& holeCards) {
+    if (holeCards.size() != 2) return 0;
+    const auto rankSignal = [&holeCards] {
+        const auto high = std::max(static_cast<int>(holeCards[0].rank), static_cast<int>(holeCards[1].rank));
+        const auto low = std::min(static_cast<int>(holeCards[0].rank), static_cast<int>(holeCards[1].rank));
+        const auto highValue = static_cast<double>(high - 2) / 12.0;
+        const auto lowValue = static_cast<double>(low - 2) / 12.0;
+        auto value = 18.0 + highValue * 36.0 + lowValue * 11.0;
+        if (holeCards[0].rank == holeCards[1].rank) value += 25.0;
+        if (holeCards[0].suit == holeCards[1].suit) value += 5.0;
+        const auto gap = high - low;
+        if (gap == 1) value += 7.0;
+        else if (gap == 2) value += 3.0;
+        return value;
+    };
+    if (cards.size() < 5) return std::clamp(static_cast<int>(std::lround(rankSignal())), 0, 100);
+
+    constexpr std::array<double, 9> categoryBase{22.0, 39.0, 56.0, 68.0, 78.0, 84.0, 91.0, 96.0, 99.0};
+    const auto rank = bestHand(cards);
+    const auto kicker = rank.tiebreakers.empty() ? 0.0 : static_cast<double>(rank.tiebreakers.front() - 2) / 12.0;
+    const auto value = categoryBase[static_cast<std::size_t>(rank.category)] + kicker * 3.0 + rankSignal() * 0.09;
+    return std::clamp(static_cast<int>(std::lround(value)), 0, 100);
+}
+
+int boardPressureSignal(const TableView& view, const TablePlayerView& player) {
+    std::array<int, 15> ranks{};
+    std::array<int, 4> suits{};
+    for (const auto card : view.communityCards) {
+        ++ranks[static_cast<int>(card.rank)];
+        ++suits[static_cast<int>(card.suit)];
+    }
+    const auto opponents = std::count_if(view.players.begin(), view.players.end(), [&player](const TablePlayerView& candidate) {
+        return candidate.name != player.name && !candidate.folded && (candidate.stack > 0 || candidate.committed > 0);
+    });
+    auto pressure = std::min(30, static_cast<int>(opponents * 7));
+    if (!view.communityCards.empty()) {
+        if (*std::ranges::max_element(ranks) >= 2) pressure += 10;
+        const auto mostSuited = *std::ranges::max_element(suits);
+        if (mostSuited >= 4) pressure += 25;
+        else if (mostSuited == 3) pressure += 12;
+        auto bestWindow = 0;
+        for (int high = 14; high >= 5; --high) {
+            auto present = 0;
+            for (int rank = high; rank > high - 5; --rank) present += ranks[rank] > 0;
+            bestWindow = std::max(bestWindow, present);
+        }
+        if (bestWindow >= 4) pressure += 18;
+        else if (bestWindow == 3) pressure += 7;
+    }
+    return std::clamp(pressure, 0, 100);
+}
+
+std::string positionForInsight(const TableView& view, const TablePlayerView& player) {
+    const auto isSmallBlind = view.smallBlindSeat && *view.smallBlindSeat == player.seat;
+    const auto isBigBlind = view.bigBlindSeat && *view.bigBlindSeat == player.seat;
+    if (player.dealer && isSmallBlind) return "Button / Small Blind";
+    if (player.dealer) return "Button";
+    if (isSmallBlind) return "Small Blind";
+    if (isBigBlind) return "Big Blind";
+
+    std::vector<std::size_t> seats;
+    for (const auto& candidate : view.players) {
+        if (!candidate.folded && (candidate.stack > 0 || candidate.committed > 0)) seats.push_back(candidate.seat);
+    }
+    if (!view.dealerSeat || seats.size() < 3) return "Position unavailable";
+    const auto lastSeat = *std::ranges::max_element(seats);
+    std::ranges::sort(seats, [dealer = *view.dealerSeat, lastSeat](std::size_t left, std::size_t right) {
+        const auto distance = [dealer, lastSeat](std::size_t seat) {
+            return seat == dealer ? std::size_t{0} : seat > dealer ? seat - dealer : seat + lastSeat - dealer;
+        };
+        const auto leftDistance = distance(left);
+        const auto rightDistance = distance(right);
+        return leftDistance < rightDistance;
+    });
+    const auto index = std::ranges::find(seats, player.seat);
+    if (index == seats.end()) return "Position unavailable";
+    const auto offset = static_cast<std::size_t>(std::distance(seats.begin(), index));
+    if (offset <= seats.size() / 3) return "Early Position";
+    if (offset + 1 >= seats.size() * 2 / 3) return "Late Position";
+    return "Middle Position";
 }
 
 } // namespace
@@ -562,6 +670,115 @@ TableView Table::viewFor(std::string_view viewerName) const {
         if (legal.check || legal.call || legal.bet || legal.raise || legal.fold) view.legalActions = legal;
     }
     return view;
+}
+
+HandInsight Table::handInsightFor(std::string_view viewerName) const {
+    if (viewerName.empty()) throw std::invalid_argument("a seated viewer is required for hand insight");
+    const auto view = viewFor(viewerName);
+    const auto player = std::ranges::find_if(view.players, [viewerName](const TablePlayerView& candidate) {
+        return candidate.name == viewerName;
+    });
+    if (player == view.players.end()) throw std::invalid_argument("viewer is not seated at this table");
+    if (player->holeCards.size() != 2) throw std::logic_error("hand insight requires the viewer's private cards");
+
+    std::vector<cards::Card> knownCards = view.communityCards;
+    knownCards.insert(knownCards.end(), player->holeCards.begin(), player->holeCards.end());
+    const auto pot = std::accumulate(view.pots.begin(), view.pots.end(), Chips{0}, [](Chips total, const PotView& item) {
+        return total + item.amount;
+    });
+    const auto playersInHand = static_cast<std::size_t>(std::count_if(view.players.begin(), view.players.end(), [](const TablePlayerView& candidate) {
+        return !candidate.folded && (candidate.stack > 0 || candidate.committed > 0);
+    }));
+    HandInsight result{.eventSequence = view.eventSequence, .street = view.street,
+        .handDescription = describeAvailableHand(knownCards), .position = positionForInsight(view, *player),
+        .stack = player->stack,
+        .stackBigBlinds = view.bigBlind == 0 ? 0.0 : static_cast<double>(player->stack) / static_cast<double>(view.bigBlind),
+        .pot = pot, .playersInHand = playersInHand,
+        .strengthSignal = handStrengthSignal(knownCards, player->holeCards),
+        .boardPressure = boardPressureSignal(view, *player)};
+
+    if (view.communityCards.size() >= 3 && view.communityCards.size() < 5) {
+        const auto alreadyStraight = completesStraightUsingHoleCard(knownCards, player->holeCards);
+        for (auto suit = 0; suit < 4; ++suit) {
+            const auto suitCount = std::count_if(knownCards.begin(), knownCards.end(), [suit](const cards::Card& card) {
+                return static_cast<int>(card.suit) == suit;
+            });
+            const auto heroHasSuit = std::ranges::any_of(player->holeCards, [suit](const cards::Card& card) {
+                return static_cast<int>(card.suit) == suit;
+            });
+            for (auto rank = static_cast<int>(cards::Rank::two); rank <= static_cast<int>(cards::Rank::ace); ++rank) {
+                const cards::Card candidate{.suit = static_cast<cards::Suit>(suit), .rank = static_cast<cards::Rank>(rank)};
+                if (containsCard(knownCards, candidate)) continue;
+                const auto flush = heroHasSuit && suitCount == 4;
+                auto withCandidate = knownCards;
+                withCandidate.push_back(candidate);
+                const auto straight = !alreadyStraight && completesStraightUsingHoleCard(withCandidate, player->holeCards);
+                if (!flush && !straight) continue;
+                const auto improvement = flush && straight ? "Completes a straight and a flush" : flush ? "Completes a flush" : "Completes a straight";
+                result.improvementOuts.push_back({.card = candidate, .improvement = improvement});
+            }
+        }
+        const auto unseen = 52 - static_cast<int>(knownCards.size());
+        if (unseen > 0 && !result.improvementOuts.empty()) {
+            const auto outs = static_cast<double>(result.improvementOuts.size());
+            result.nextCardChance = outs / static_cast<double>(unseen);
+            result.byRiverChance = view.communityCards.size() == 3 && unseen > 1
+                ? 1.0 - ((static_cast<double>(unseen) - outs) / static_cast<double>(unseen))
+                    * ((static_cast<double>(unseen - 1) - outs) / static_cast<double>(unseen - 1))
+                : result.nextCardChance;
+            const auto individualNextCardChance = 1.0 / static_cast<double>(unseen);
+            const auto individualByRiverChance = view.communityCards.size() == 3 && unseen > 1
+                ? 1.0 - (static_cast<double>(unseen - 1) / static_cast<double>(unseen))
+                    * (static_cast<double>(unseen - 2) / static_cast<double>(unseen - 1))
+                : individualNextCardChance;
+            for (auto& out : result.improvementOuts) {
+                out.nextCardChance = individualNextCardChance;
+                out.byRiverChance = individualByRiverChance;
+            }
+        }
+    }
+
+    result.reasons.push_back("BluffSkill heuristic v1 uses public board texture and your private cards; it is not an equity calculation or a GTO solver.");
+    result.reasons.push_back("Strength signal: " + std::to_string(result.strengthSignal) + "/100. Board pressure: "
+        + std::to_string(result.boardPressure) + "/100.");
+    if (!result.improvementOuts.empty()) {
+        result.reasons.push_back(std::to_string(result.improvementOuts.size()) + " straight/flush improvement cards: "
+            + std::to_string(static_cast<int>(std::lround(result.nextCardChance * 100))) + "% on the next card and "
+            + std::to_string(static_cast<int>(std::lround(result.byRiverChance * 100)))
+            + "% by the river. They improve your hand; they do not guarantee a winning hand.");
+    }
+
+    if (!view.legalActions || !player->acting) {
+        result.reasons.push_back(player->busted ? "No recommendation: you have been eliminated." : "No recommendation: wait until it is your turn.");
+        return result;
+    }
+    const auto& legal = *view.legalActions;
+    result.callAmount = legal.callAmount;
+    if (legal.call) {
+        result.requiredPotOdds = legal.callAmount == 0 ? 0.0
+            : static_cast<double>(legal.callAmount) / static_cast<double>(std::max<Chips>(1, pot + legal.callAmount));
+        result.reasons.push_back("Calling costs " + std::to_string(legal.callAmount) + " into " + std::to_string(pot)
+            + "; required pot odds are " + std::to_string(static_cast<int>(std::lround(*result.requiredPotOdds * 100))) + "%.");
+    }
+
+    const auto callThreshold = 35 + (result.requiredPotOdds ? static_cast<int>(std::lround(*result.requiredPotOdds * 40)) : 0)
+        + static_cast<int>(playersInHand > 2 ? (playersInHand - 2) * 6 : 0)
+        - std::min(15, static_cast<int>(std::lround(result.byRiverChance * 25)));
+    if ((legal.bet || legal.raise) && result.strengthSignal >= 88 && result.boardPressure <= 30 && playersInHand == 2) {
+        result.recommendedAction = legal.raise ? Action::raise : Action::bet;
+        result.recommendedAmount = legal.minimumAmount;
+        result.reasons.push_back("Heads-up, strong-hand branch: use the legal minimum " + std::string(toString(*result.recommendedAction)) + ".");
+    } else if (legal.check) {
+        result.recommendedAction = Action::check;
+        result.reasons.push_back("Check branch: this heuristic does not bet without its strongest heads-up signal.");
+    } else if (legal.call && result.strengthSignal >= callThreshold) {
+        result.recommendedAction = Action::call;
+        result.reasons.push_back("Call branch: strength signal meets the transparent call threshold of " + std::to_string(callThreshold) + "/100.");
+    } else if (legal.fold) {
+        result.recommendedAction = Action::fold;
+        result.reasons.push_back("Fold branch: strength signal is below the transparent call threshold of " + std::to_string(callThreshold) + "/100.");
+    }
+    return result;
 }
 
 bool Table::hasSingleLiveSeat() const { return liveSeats().size() == 1; }

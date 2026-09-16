@@ -13,6 +13,7 @@ The initial prototype uses one `TournamentCompetition`, one `Table`, at most ten
 | `Card`, `Deck`, `CardCollection` | general playing-card primitives; immutable card values; deck is mutable |
 | `FlavorRules` | rule policy: streets, hole/community count, betting form, showdown evaluation |
 | `Table` | seating, dealer button, hand lifecycle, turn and action validation; authoritative post-settlement bust status |
+| `HandInsight` | viewer-specific engine projection of the current hand, transparent heuristic inputs, straight/flush improvement cards, and a legal-action recommendation |
 | `HandState` | deck, community, hole cards, betting rounds, action history, pots |
 | `Stack` | integer chip amounts, always representable by the competition's smallest active denomination; optional chip inventory for display/withdrawal |
 | `Pot` / `SidePot` | amount and eligible seats, derived from committed amounts |
@@ -29,6 +30,8 @@ Use integer chip units (`std::int64_t`) rather than floating point. Every compet
 The no-limit raise floor is the previous full bet or raise: the big blind begins each preflop round as the opening bet, an opening bet must be at least the big blind, and every full raise must add at least the size of the preceding full bet or raise. A player whose maximum commitment is below that floor may raise only by committing their entire remaining stack; that short all-in does not establish a new full-raise amount.
 
 Reference-player type is public seat metadata (`Leo`, `August Leo`, `Virgo`, `August Virgo`, or `Libra`), while profile values and decision calculations remain server-private. The default Leo and Virgo policies share a showdown-aware hand estimate, draw detection, public board threat, current-street aggression, and pot-relative sizing. Leo applies pressure more readily; Virgo calls more selectively and value/protection bets strong made hands or credible draws. Libra has no profile: its versioned, deterministic canon uses fixed ranges and direct draw odds, while deliberately excluding bluff and semi-bluff actions. The August classes preserve the prior policies for reproducible baseline comparisons. The server's reference-player factory registry is the single source of truth for available types; adding a factory registration exposes that type to custom-game clients. No policy receives opponents' hole cards or bypasses `Table` action validation.
+
+`HandInsight` never reveals an opponent's cards and is not a reference-player policy. It describes the requesting player's available hand, position, stack and pot context, player count, and straight/flush **improvement cards** that use a private card. Each listed physical card carries its own next-card and by-river chance; the summary values are the exact chance of seeing at least one listed card among unknown cards. Neither is equity or a claim that an improvement will win. The v1 recommendation is a deterministic, conservative signal based on the player's private-card/made-hand score, public board pressure, player count, and current legal action price. It reports the score, price, threshold, and selected branch in prose so it can be inspected and changed without presenting it as GTO.
 
 ## Hand ranking
 
