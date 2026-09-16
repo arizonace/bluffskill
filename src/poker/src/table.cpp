@@ -159,6 +159,7 @@ struct Table::Seat {
     Chips stack{0};
     Chips handCommitted{0};
     Chips roundCommitted{0};
+    bool busted{false};
     bool folded{false};
     bool allIn{false};
     bool pending{false};
@@ -328,8 +329,10 @@ void Table::startHand() {
     for (auto& seat : seats_) {
         seat.handCommitted = 0;
         seat.roundCommitted = 0;
-        seat.folded = seat.stack == 0;
-        seat.allIn = seat.stack == 0;
+        // Only a preceding settlement can mark a seat as busted. A live
+        // all-in has a zero stack too, but is not an elimination.
+        seat.folded = seat.busted;
+        seat.allIn = false;
         seat.pending = false;
         seat.canRaise = true;
         seat.holeCards.clear();
@@ -401,6 +404,7 @@ void Table::restartGame(std::string gameName) {
         seat.stack = startingStack_;
         seat.handCommitted = 0;
         seat.roundCommitted = 0;
+        seat.busted = false;
         seat.folded = false;
         seat.allIn = false;
         seat.pending = false;
@@ -543,7 +547,7 @@ TableView Table::viewFor(std::string_view viewerName) const {
     for (const auto& seat : seats_) {
         TablePlayerView player{.name = seat.name, .kind = seat.kind, .seat = seat.number, .stack = seat.stack, .committed = seat.handCommitted,
                                .roundCommitted = seat.roundCommitted,
-                               .folded = seat.folded, .dealer = dealerSeat_ && *dealerSeat_ == seat.number,
+                               .busted = seat.busted, .folded = seat.folded, .dealer = dealerSeat_ && *dealerSeat_ == seat.number,
                                .acting = actingSeat_ && *actingSeat_ == seat.number};
         if (viewer == &seat || (showdownOccurred_ && !seat.folded)) player.holeCards = seat.holeCards;
         if ((showdownOccurred_ && !seat.folded) || (viewer == &seat && street_ == Street::showdown)) {
@@ -581,6 +585,10 @@ void Table::returnUncalledContribution() {
     seat.allIn = false;
 }
 
+void Table::updateBustedSeats() {
+    for (auto& seat : seats_) seat.busted = seat.stack == 0;
+}
+
 void Table::finishByFold() {
     returnUncalledContribution();
     const auto live = liveSeats();
@@ -590,6 +598,7 @@ void Table::finishByFold() {
     live.front()->stack += winnings;
     payouts_.clear();
     if (winnings > 0) payouts_.push_back({.amount = winnings, .awards = {{.seat = live.front()->number, .amount = winnings}}});
+    updateBustedSeats();
     showdownOccurred_ = false;
     street_ = Street::showdown;
     actingSeat_.reset();
@@ -632,6 +641,7 @@ void Table::settleShowdown() {
         }
         payouts_.push_back(std::move(payout));
     }
+    updateBustedSeats();
     showdownOccurred_ = true;
 }
 

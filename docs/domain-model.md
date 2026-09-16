@@ -12,7 +12,7 @@ The initial prototype uses one `TournamentCompetition`, one `Table`, at most ten
 | --- | --- |
 | `Card`, `Deck`, `CardCollection` | general playing-card primitives; immutable card values; deck is mutable |
 | `FlavorRules` | rule policy: streets, hole/community count, betting form, showdown evaluation |
-| `Table` | seating, dealer button, hand lifecycle, turn and action validation |
+| `Table` | seating, dealer button, hand lifecycle, turn and action validation; authoritative post-settlement bust status |
 | `HandState` | deck, community, hole cards, betting rounds, action history, pots |
 | `Stack` | integer chip amounts, always representable by the competition's smallest active denomination; optional chip inventory for display/withdrawal |
 | `Pot` / `SidePot` | amount and eligible seats, derived from committed amounts |

@@ -104,6 +104,7 @@ public:
         playerRoundCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
+        playerBusted_.fill(false);
         playerFolded_.fill(false);
         playerSmallBlind_.fill(false);
         playerBigBlind_.fill(false);
@@ -131,6 +132,7 @@ public:
         playerRoundCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
+        playerBusted_.fill(false);
         playerFolded_.fill(false);
         playerSmallBlind_.fill(false);
         playerBigBlind_.fill(false);
@@ -158,6 +160,7 @@ public:
         playerRoundCommitted_.fill(0);
         playerActing_.fill(false);
         playerDealer_.fill(false);
+        playerBusted_.fill(false);
         playerFolded_.fill(false);
         playerSmallBlind_.fill(false);
         playerBigBlind_.fill(false);
@@ -177,6 +180,7 @@ public:
                 playerRoundCommitted_[index] = player.value("roundCommitted").toInteger();
                 playerActing_[index] = player.value("acting").toBool();
                 playerDealer_[index] = player.value("dealer").toBool();
+                playerBusted_[index] = player.value("busted").toBool();
                 playerFolded_[index] = player.value("folded").toBool();
                 for (const auto& card : player.value("holeCards").toArray()) playerHoleCards_[index].append(card.toString());
                 playerShowdownDescriptions_[index] = player.value("showdownDescription").toString();
@@ -244,6 +248,7 @@ public:
         playerCommitted_.fill(0);
         playerRoundCommitted_.fill(0);
         playerActing_.fill(false);
+        playerBusted_.fill(false);
         playerFolded_.fill(false);
         playerPotWinnings_.fill(0);
         playerNetWinnings_.fill(0);
@@ -341,8 +346,7 @@ protected:
         painter.setFont(QFont("Helvetica", 12));
         for (std::size_t i = 0; i < seats.size(); ++i) {
             const auto point = seats[i];
-            const auto busted = hasTableState_ && !playerNames_[i].isEmpty() && playerStacks_[i] == 0
-                && (street_ == "Showdown" || playerCommitted_[i] == 0);
+            const auto busted = hasTableState_ && !playerNames_[i].isEmpty() && playerBusted_[i];
             const auto folded = playerFolded_[i] && !busted;
             painter.setBrush(busted ? QColor("#777777") : folded ? QColor("#454545") : QColor("#162D24"));
             const auto localPlayer = !localPlayerName_.isEmpty() && playerNames_[i] == localPlayerName_;
@@ -377,7 +381,7 @@ protected:
             const auto tangent = tangents[i];
             const auto blind = playerSmallBlind_[i] ? RoleButton::smallBlind
                 : playerBigBlind_[i] ? RoleButton::bigBlind : RoleButton::none;
-            const auto busted = playerStacks_[i] == 0 && (street_ == "Showdown" || playerCommitted_[i] == 0);
+            const auto busted = playerBusted_[i];
             if (playerFolded_[i] && !busted) drawFoldedMarker(painter, point + QPointF(0, 25));
             if (playerDealer_[i] && blind != RoleButton::none) {
                 const auto dealerButton = drawRoleButton(painter, buttonArea - tangent * 17, RoleButton::dealer);
@@ -582,6 +586,7 @@ private:
     std::array<qint64, defaultTableSeats> playerRoundCommitted_{};
     std::array<bool, defaultTableSeats> playerActing_{};
     std::array<bool, defaultTableSeats> playerDealer_{};
+    std::array<bool, defaultTableSeats> playerBusted_{};
     std::array<bool, defaultTableSeats> playerFolded_{};
     std::array<bool, defaultTableSeats> playerSmallBlind_{};
     std::array<bool, defaultTableSeats> playerBigBlind_{};
@@ -922,14 +927,16 @@ public:
         server_ = new QComboBox(connection); server_->addItem("Not connected"); server_->setEnabled(false);
         competition_ = new QComboBox(connection); competition_->addItem("Choose a server first"); competition_->setEnabled(false);
         table_ = new QComboBox(connection); table_->addItem("Choose a competition first"); table_->setEnabled(false);
-        connectionRow->addWidget(new QLabel("Server", connection));
-        connectionRow->addWidget(server_, 1);
-        connectionRow->addSpacing(14);
-        connectionRow->addWidget(new QLabel("Competition", connection));
-        connectionRow->addWidget(competition_, 1);
-        connectionRow->addSpacing(14);
-        connectionRow->addWidget(new QLabel("Table", connection));
-        connectionRow->addWidget(table_, 1);
+        // These preserve the selected server resources for request routing;
+        // the top-level UI presents that state as one read-only breadcrumb.
+        server_->hide();
+        competition_->hide();
+        table_->hide();
+        breadcrumb_ = new QLabel(connection);
+        breadcrumb_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        breadcrumb_->setAccessibleName("Current game location");
+        updateBreadcrumb();
+        connectionRow->addWidget(breadcrumb_, 1);
         pausePlayButton_ = new QPushButton(connection);
         pausePlayButton_->setFixedWidth(38);
         pausePlayButton_->setEnabled(false);
@@ -1107,8 +1114,16 @@ public:
         auto* aboutAction = applicationMenu->addAction("About BluffSkill");
         connect(settingsAction, &QAction::triggered, this, [this] { editSettings(); });
         connect(aboutAction, &QAction::triggered, this, [this] { showAbout(); });
-        connect(competition_, &QComboBox::currentIndexChanged, this, [this] { refreshTables(); });
-        connect(table_, &QComboBox::currentIndexChanged, this, [this] { refreshSeats(); });
+        connect(competition_, &QComboBox::currentIndexChanged, this, [this] {
+            gameName_.clear();
+            updateBreadcrumb();
+            refreshTables();
+        });
+        connect(table_, &QComboBox::currentIndexChanged, this, [this] {
+            gameName_ = table_->currentData().toJsonObject().value("game").toString();
+            updateBreadcrumb();
+            refreshSeats();
+        });
         nextHandTimer_.setSingleShot(true);
         automatedActionTimer_.setSingleShot(true);
         automatedRestartTimer_.setSingleShot(true);
@@ -1152,6 +1167,23 @@ private:
         return url;
     }
 
+    void updateBreadcrumb() {
+        QStringList segments{"BluffSkill"};
+        if (!connected_) {
+            segments.append("Not connected");
+        } else {
+            segments.append("Server: " + server_->currentText());
+            if (competition_->isEnabled() && competition_->currentIndex() >= 0) {
+                segments.append("Competition: " + competition_->currentText());
+            }
+            if (table_->isEnabled() && table_->currentIndex() >= 0) segments.append("Table: " + table_->currentText());
+            if (!gameName_.isEmpty()) segments.append("Game: " + gameName_);
+        }
+        const auto text = segments.join("  ›  ");
+        breadcrumb_->setText(text);
+        breadcrumb_->setToolTip(text);
+    }
+
     void editSettings() {
         SettingsDialog dialog(settings_, this);
         if (dialog.exec() != QDialog::Accepted) return;
@@ -1186,6 +1218,8 @@ private:
         table_->clear();
         table_->addItem("Choose a competition first");
         table_->setEnabled(false);
+        gameName_.clear();
+        updateBreadcrumb();
         clearHumanPlayer();
         disconnectAction_->setEnabled(false);
         setNewGameActionsEnabled(false);
@@ -1248,6 +1282,7 @@ private:
             server_->setEnabled(true);
             server_->clear();
             server_->addItem(address);
+            updateBreadcrumb();
             disconnectAction_->setEnabled(true);
             setNewGameActionsEnabled(true);
             restartGameAction_->setEnabled(true);
@@ -1307,6 +1342,8 @@ private:
                 competition_->clear();
                 competition_->addItem("Could not retrieve competitions");
                 competition_->setEnabled(false);
+                gameName_.clear();
+                updateBreadcrumb();
                 statusBar()->showMessage("Connected, but competitions could not be retrieved.");
                 return;
             }
@@ -1328,6 +1365,8 @@ private:
                     table_->addItem("Create a new game first");
                     table_->setEnabled(false);
                 }
+                gameName_.clear();
+                updateBreadcrumb();
                 pokerTable_->clearPlayers();
                 return;
             }
@@ -1339,6 +1378,7 @@ private:
                     competition_->setCurrentIndex(index);
                 }
             }
+            updateBreadcrumb();
             refreshTables();
         });
     }
@@ -1362,6 +1402,8 @@ private:
                 table_->clear();
                 table_->addItem("Could not retrieve tables");
                 table_->setEnabled(false);
+                gameName_.clear();
+                updateBreadcrumb();
                 pokerTable_->clearPlayers();
                 return;
             }
@@ -1374,6 +1416,8 @@ private:
                 }
                 table_->setEnabled(table_->count() > 0);
             }
+            gameName_ = table_->currentData().toJsonObject().value("game").toString();
+            updateBreadcrumb();
             refreshSeats();
         });
     }
@@ -1432,6 +1476,8 @@ private:
             presentFinalAutomatedActions_ = false;
         }
         pokerTable_->setTableView(view);
+        gameName_ = view.value("game").toString();
+        updateBreadcrumb();
         playBustSounds(view);
         presentedCommunityCards_ = communityCards(view);
         queuedCommunityCardCount_ = presentedCommunityCards_.size();
@@ -1639,7 +1685,9 @@ private:
             const auto player = item.toObject();
             const auto name = player.value("name").toString();
             const auto stack = player.value("stack").toInteger();
-            if (knownPlayerStacks_.contains(name) && knownPlayerStacks_.value(name) > 0 && stack == 0) playerBusted = true;
+            if (player.value("busted").toBool() && knownPlayerStacks_.contains(name) && knownPlayerStacks_.value(name) > 0 && stack == 0) {
+                playerBusted = true;
+            }
             stacks.insert(name, stack);
         }
         knownPlayerStacks_ = std::move(stacks);
@@ -2609,9 +2657,11 @@ private:
     QSoundEffect allInSound_;
     QSoundEffect tableWinnerSound_;
     QHash<QString, qint64> knownPlayerStacks_;
+    QString gameName_;
     QComboBox* server_{};
     QComboBox* competition_{};
     QComboBox* table_{};
+    QLabel* breadcrumb_{};
     QLineEdit* remainingPlayers_{};
     QLabel* remainingPlayersCaption_{};
     QLineEdit* smallBlindAmount_{};

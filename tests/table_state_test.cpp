@@ -57,6 +57,9 @@ int main() {
     assert(botOneTurn.actionHistory.back().stackAfter == 0);
     assert(botOneTurn.actionHistory.back().potAfter == 125);
     assert(botOneTurn.actionHistory.back().currentBetAfter == 50);
+    // Alice is all-in, but remains eligible for the main pot and is not
+    // eliminated until the hand has settled.
+    assert(!botOneTurn.players[0].busted);
     assert(botOneTurn.actingSeat == 2);
     assert(botOneTurn.legalActions && botOneTurn.legalActions->raise);
     assert((botOneTurn.chipDenominations == ChipDenominations{25, 100, 500, 1000}));
@@ -102,6 +105,9 @@ int main() {
     assert(finished.payouts.size() == 2);
     assert(finished.payouts[0].amount == 150);
     assert(finished.payouts[1].amount == 300);
+    for (const auto& player : finished.players) {
+        assert(player.busted == (player.stack == 0));
+    }
 
     Table configuredSmallBlind("Configured small blind", 2, 1'000,
         BlindSchedule{.smallBlind = 50});

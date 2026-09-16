@@ -42,7 +42,7 @@ For the first playable slice, serialize only at clean hand boundaries. The serve
 
 ## Public and private views
 
-The engine produces a `TableView` for each viewer rather than exposing domain objects. A public view has community cards, shown cards, stack totals, action history, pot/side-pot eligibility, dealer button, and acting seat. A player view additionally has that player’s hole cards. Internal deck order, folded hole cards, opponents’ hole cards, bot parameters, and secrets never cross this boundary. The trusted server console may place a folding reference player's cards, or the cards of an API player who explicitly opted in at creation, in its hidden local action-log `Hole` field. Those local values may be backfilled only in a user-requested saved CSV export; they must not add cards to a public view, REST response, or client UI.
+The engine produces a `TableView` for each viewer rather than exposing domain objects. A public view has community cards, shown cards, stack totals, action history, pot/side-pot eligibility, dealer button, acting seat, and each player's server-derived `busted` status. That status is set only after a hand settles with a zero stack, so a live all-in player is never presented as eliminated. A player view additionally has that player’s hole cards. Internal deck order, folded hole cards, opponents’ hole cards, bot parameters, and secrets never cross this boundary. The trusted server console may place a folding reference player's cards, or the cards of an API player who explicitly opted in at creation, in its hidden local action-log `Hole` field. Those local values may be backfilled only in a user-requested saved CSV export; they must not add cards to a public view, REST response, or client UI.
 
 ## API evolution
 

@@ -1374,7 +1374,7 @@ QJsonObject tableViewJson(const bluffskill::poker::TableView& table) {
             {"kind", QString::fromUtf8(bluffskill::poker::toString(player.kind))},
             {"seat", static_cast<int>(player.seat)}, {"stack", static_cast<qint64>(player.stack)},
             {"committed", static_cast<qint64>(player.committed)}, {"roundCommitted", static_cast<qint64>(player.roundCommitted)},
-            {"folded", player.folded},
+            {"busted", player.busted}, {"folded", player.folded},
             {"dealer", player.dealer}, {"acting", player.acting}, {"holeCards", holeCards},
             {"showdownDescription", QString::fromStdString(player.showdownDescription)}});
     }

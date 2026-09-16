@@ -87,6 +87,9 @@ struct TablePlayerView {
     Chips stack{0};
     Chips committed{0};
     Chips roundCommitted{0}; // Chips awaiting collection into the center pot for this betting round.
+    // Set only after a hand is settled and the player has no remaining stack.
+    // A live all-in player is therefore never reported as busted.
+    bool busted{false};
     bool folded{false};
     bool dealer{false};
     bool acting{false};
@@ -178,6 +181,7 @@ private:
     void advanceStreet();
     void updateActor();
     void returnUncalledContribution();
+    void updateBustedSeats();
     void finishByFold();
     void settleShowdown();
     void advanceBlindLevelIfDue();
