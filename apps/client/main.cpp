@@ -90,6 +90,14 @@ void drawCardFace(QPainter& painter, const QRectF& cardRect, const QString& desc
     painter.restore();
 }
 
+void drawCardBack(QPainter& painter, const QRectF& cardRect) {
+    painter.save();
+    painter.setPen(QPen(QColor("#C8A55B"), 2));
+    painter.setBrush(QColor("#FFF9EA"));
+    painter.drawRoundedRect(cardRect, 7, 7);
+    painter.restore();
+}
+
 class PokerTable final : public QWidget {
 public:
     explicit PokerTable(QWidget* parent = nullptr) : QWidget(parent) {
@@ -615,6 +623,7 @@ public:
     explicit LocalHoleCardsWidget(QWidget* parent = nullptr) : QWidget(parent) {
         setVisible(false);
         setAccessibleName("Your hole cards");
+        revealed_ = false;
     }
 
     void setCards(QStringList cards, QString description = {}) {
@@ -623,6 +632,11 @@ public:
         const auto showingDescription = !description_.isEmpty();
         setFixedSize(showingDescription ? 240 : 108, showingDescription ? 98 : 68);
         setVisible(!cards_.isEmpty());
+        update();
+    }
+
+    void setRevealed(bool revealed) {
+        revealed_ = revealed;
         update();
     }
 
@@ -637,7 +651,11 @@ protected:
         const auto rowWidth = cards_.size() * cardWidth + std::max<qsizetype>(0, cards_.size() - 1) * gap;
         auto left = (width() - rowWidth) / 2.0;
         for (const auto& card : cards_) {
-            drawCardFace(painter, {left, 2.0, cardWidth, cardHeight}, card);
+            if (revealed_) {
+                drawCardFace(painter, {left, 2.0, cardWidth, cardHeight}, card);
+            } else {
+                drawCardBack(painter, {left, 2.0, cardWidth, cardHeight});
+            }
             left += cardWidth + gap;
         }
         if (!description_.isEmpty()) {
@@ -650,6 +668,7 @@ protected:
 private:
     QStringList cards_;
     QString description_;
+    bool revealed_;
 };
 
 class SettingsDialog final : public QDialog {
@@ -1084,12 +1103,21 @@ public:
         raiseSummary_ = new QLabel(actions);
         wagerLayout->addWidget(raiseSummary_);
         wagerLayout->addStretch(1);
+        holeCardButtonsLayout_ = new QVBoxLayout();
+        peekButton_ = new QPushButton("Peek", actions);
+        peekButton_->setAccessibleName("Peek at hole cards.");
+        peekButton_->setToolTip("Temporarily turn your hole cards face up while holding the button.");
+        peekButton_->setEnabled(false);
+        connect(peekButton_, &QPushButton::pressed, this, [this] { localHoleCardsWidget_->setRevealed(true);});
+        connect(peekButton_, &QPushButton::released, this, [this] { localHoleCardsWidget_->setRevealed(false);});
+        holeCardButtonsLayout_->addWidget(peekButton_);
         handInsightButton_ = new QPushButton("ⓘ Hand insight", actions);
         handInsightButton_->setAccessibleName("Show hand insight");
         handInsightButton_->setToolTip("Show a server-calculated explanation of your current hand");
         handInsightButton_->setEnabled(false);
         connect(handInsightButton_, &QPushButton::clicked, this, [this] { toggleHandInsight(); });
-        wagerLayout->addWidget(handInsightButton_);
+        holeCardButtonsLayout_->addWidget(handInsightButton_);
+        wagerLayout->addLayout(holeCardButtonsLayout_);
         localHoleCardsWidget_ = new LocalHoleCardsWidget(actions);
         wagerLayout->addWidget(localHoleCardsWidget_);
         actionLayout->addLayout(wagerLayout);
@@ -1611,6 +1639,7 @@ private:
         presentedCommunityCards_ = communityCards(view);
         queuedCommunityCardCount_ = presentedCommunityCards_.size();
         localHoleCardsWidget_->setCards(view.value("street").toString() == "Showdown" ? QStringList{} : pokerTable_->localHoleCards());
+        peekButton_->setEnabled(humanPlayer_ && view.value("street").toString() != "Showdown" && view.value("street").toString() != "Waiting");
         tableSequence_ = view.value("sequence").toInteger();
         lastStreet_ = view.value("street").toString();
         handInsightButton_->setEnabled(humanPlayer_ && view.value("street").toString() != "Waiting");
@@ -2701,6 +2730,7 @@ private:
         humanPlayer_.reset();
         pokerTable_->setLocalPlayerName({});
         localHoleCardsWidget_->setCards(QStringList{});
+        peekButton_->setEnabled(false);
         setActionControlsEnabled(false);
         setWagerControlsEnabled(false);
         amountEdit_->clear();
@@ -2809,7 +2839,9 @@ private:
     QPushButton* dealNowButton_{};
     PokerTable* pokerTable_{};
     LocalHoleCardsWidget* localHoleCardsWidget_{};
+    QVBoxLayout* holeCardButtonsLayout_{};
     QPushButton* handInsightButton_{};
+    QPushButton* peekButton_{};
     QFrame* handInsightPanel_{};
     QTextBrowser* handInsightContent_{};
     QLabel* actionClockCaption_{};
