@@ -632,6 +632,7 @@ public:
         const auto showingDescription = !description_.isEmpty();
         setFixedSize(showingDescription ? 240 : 108, showingDescription ? 98 : 68);
         setVisible(!cards_.isEmpty());
+        revealed_ = false; // Always hide the cards when the cards change.
         update();
     }
 
