@@ -95,6 +95,21 @@ void drawCardBack(QPainter& painter, const QRectF& cardRect) {
     painter.setPen(QPen(QColor("#C8A55B"), 2));
     painter.setBrush(QColor("#FFF9EA"));
     painter.drawRoundedRect(cardRect, 7, 7);
+
+    const auto backRect = cardRect.adjusted(5, 5, -5, -5);
+    painter.setPen(QPen(QColor("#C8A55B"), 1));
+    painter.setBrush(QColor("#1F5B4F"));
+    painter.drawRoundedRect(backRect, 4, 4);
+
+    const auto latticeRect = backRect.adjusted(3, 3, -3, -3);
+    painter.setPen(QPen(QColor("#E8D18D"), 1));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRoundedRect(latticeRect, 2, 2);
+    painter.setClipRect(latticeRect);
+    for (qreal offset = latticeRect.left() - latticeRect.height(); offset < latticeRect.right(); offset += 8) {
+        painter.drawLine(QPointF(offset, latticeRect.bottom()), QPointF(offset + latticeRect.height(), latticeRect.top()));
+        painter.drawLine(QPointF(offset, latticeRect.top()), QPointF(offset + latticeRect.height(), latticeRect.bottom()));
+    }
     painter.restore();
 }
 
