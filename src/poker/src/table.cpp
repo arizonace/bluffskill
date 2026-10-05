@@ -108,6 +108,40 @@ std::string describeHand(const HandRank& rank) {
     }
 }
 
+char shortSuitName(cards::Suit suit) {
+    switch (suit) {
+    case cards::Suit::clubs: return 'c';
+    case cards::Suit::diamonds: return 'd';
+    case cards::Suit::hearts: return 'h';
+    case cards::Suit::spades: return 's';
+    }
+    return '?';
+}
+
+std::string describeFlush(const HandRank& rank, const std::vector<cards::Card>& cards,
+    const std::vector<cards::Card>& holeCards) {
+    for (const auto suit : {cards::Suit::clubs, cards::Suit::diamonds, cards::Suit::hearts, cards::Suit::spades}) {
+        std::vector<cards::Card> suitedCards;
+        for (const auto card : cards) if (card.suit == suit) suitedCards.push_back(card);
+        std::ranges::sort(suitedCards, {}, [](const cards::Card& card) { return static_cast<int>(card.rank); });
+        std::ranges::reverse(suitedCards);
+        if (suitedCards.size() < 5) continue;
+        suitedCards.resize(5);
+
+        std::vector<int> ranks;
+        ranks.reserve(suitedCards.size());
+        for (const auto card : suitedCards) ranks.push_back(static_cast<int>(card.rank));
+        if (ranks != rank.tiebreakers) continue;
+
+        std::string result = "Flush(" + rankName(static_cast<int>(suitedCards.front().rank)) + shortSuitName(suit);
+        for (const auto card : suitedCards) {
+            if (std::ranges::find(holeCards, card) != holeCards.end()) result += ',' + rankName(static_cast<int>(card.rank));
+        }
+        return result + ')';
+    }
+    return describeHand(rank);
+}
+
 std::string describePartialHand(const std::vector<cards::Card>& cards) {
     std::array<int, 15> counts{};
     for (const auto card : cards) ++counts[static_cast<int>(card.rank)];
@@ -128,8 +162,14 @@ std::string describePartialHand(const std::vector<cards::Card>& cards) {
     return singles.empty() ? std::string{} : "High(" + rankName(singles[0]) + ")" + (singles.size() == 1 ? "" : ", " + joinRanks(singles, 1));
 }
 
-std::string describeAvailableHand(const std::vector<cards::Card>& cards) {
-    return cards.size() >= 5 ? describeHand(bestHand(cards)) : describePartialHand(cards);
+std::string describeAvailableHand(const std::vector<cards::Card>& communityCards,
+    const std::vector<cards::Card>& holeCards) {
+    std::vector<cards::Card> cards = communityCards;
+    cards.insert(cards.end(), holeCards.begin(), holeCards.end());
+    if (cards.size() < 5) return describePartialHand(cards);
+
+    const auto hand = bestHand(cards);
+    return hand.category == 5 ? describeFlush(hand, cards, holeCards) : describeHand(hand);
 }
 
 bool containsCard(const std::vector<cards::Card>& cards, cards::Card candidate) {
@@ -663,9 +703,7 @@ TableView Table::viewFor(std::string_view viewerName) const {
                                .acting = actingSeat_ && *actingSeat_ == seat.number};
         if (viewer == &seat || (showdownOccurred_ && !seat.folded)) player.holeCards = seat.holeCards;
         if ((showdownOccurred_ && !seat.folded) || (viewer == &seat && street_ == Street::showdown)) {
-            std::vector<cards::Card> cards = communityCards_;
-            cards.insert(cards.end(), seat.holeCards.begin(), seat.holeCards.end());
-            player.showdownDescription = describeAvailableHand(cards);
+            player.showdownDescription = describeAvailableHand(communityCards_, seat.holeCards);
         }
         view.players.push_back(std::move(player));
     }
@@ -694,7 +732,7 @@ HandInsight Table::handInsightFor(std::string_view viewerName) const {
         return !candidate.folded && (candidate.stack > 0 || candidate.committed > 0);
     }));
     HandInsight result{.eventSequence = view.eventSequence, .street = view.street,
-        .handDescription = describeAvailableHand(knownCards), .position = positionForInsight(view, *player),
+        .handDescription = describeAvailableHand(view.communityCards, player->holeCards), .position = positionForInsight(view, *player),
         .stack = player->stack,
         .stackBigBlinds = view.bigBlind == 0 ? 0.0 : static_cast<double>(player->stack) / static_cast<double>(view.bigBlind),
         .pot = pot, .playersInHand = playersInHand,

@@ -39,6 +39,8 @@ Represent an evaluated hand as `HandRank { category, tieBreakers }`, where categ
 
 Comparison is lexicographic: category first, then each tiebreak rank. This is conventional, deterministic, easy to test, and clearer than encoding a fragile single magic number. The evaluator returns the best five cards plus `HandRank`, which supports explaining a result in the UI.
 
+Flush descriptions keep that explanation compact: they show the high flush card with a one-letter lowercase suit, then the ranks of any hole cards used in the selected five-card flush. For example, `Flush(As,Q,10)` is an ace-high spade flush using queen and ten from the hole cards; `Flush(As)` is a board flush with no contributing hole card. Straight descriptions remain based only on the straight's high rank because equal high straights tie.
+
 ## Naming and IDs
 
 API route IDs are canonical human-readable names, not UUIDs. Parse them at the boundary and retain a normalized comparison key alongside their display form:
