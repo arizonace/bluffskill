@@ -180,6 +180,27 @@ int main() {
     assert(nextHand.dealerSeat == 2);
     assert(nextHand.smallBlindSeat == 3);
 
+    Table headsUp("Heads up", 2, 500);
+    headsUp.seatPlayer("Button One", PlayerKind::api, 1, 500);
+    headsUp.seatPlayer("Button Two", PlayerKind::api, 2, 500);
+    headsUp.startHand();
+    auto headsUpView = headsUp.viewFor("Button One");
+    assert(headsUpView.dealerSeat == 1);
+    assert(headsUpView.smallBlindSeat == 1);
+    assert(headsUpView.bigBlindSeat == 2);
+    headsUp.submitAction("Button One", Action::fold, 0, headsUpView.eventSequence);
+    headsUp.startNextHand();
+    headsUpView = headsUp.viewFor("Button Two");
+    assert(headsUpView.dealerSeat == 2);
+    assert(headsUpView.smallBlindSeat == 2);
+    assert(headsUpView.bigBlindSeat == 1);
+    headsUp.submitAction("Button Two", Action::fold, 0, headsUpView.eventSequence);
+    headsUp.startNextHand();
+    headsUpView = headsUp.viewFor("Button One");
+    assert(headsUpView.dealerSeat == 1);
+    assert(headsUpView.smallBlindSeat == 1);
+    assert(headsUpView.bigBlindSeat == 2);
+
     rotation.restartGame();
     const auto restarted = rotation.viewFor();
     assert(restarted.street == Street::preflop);
@@ -196,9 +217,24 @@ int main() {
     blindLevels.startHand();
     assert(blindLevels.viewFor().smallBlind == 25);
     auto blindView = blindLevels.viewFor("A");
+    blindLevels.pauseBlindClock();
+    try {
+        blindLevels.submitAction("A", Action::fold, 0, blindView.eventSequence);
+        assert(false && "a paused table must reject actions");
+    } catch (const CommandError& error) {
+        assert(error.failure() == CommandFailure::turnConflict);
+    }
+    blindLevels.resumeBlindClock();
     blindLevels.submitAction("A", Action::fold, 0, blindView.eventSequence);
     blindView = blindLevels.viewFor("B");
     blindLevels.submitAction("B", Action::fold, 0, blindView.eventSequence);
+    blindLevels.pauseBlindClock();
+    try {
+        blindLevels.startNextHand();
+        assert(false && "a paused table must not begin the next hand");
+    } catch (const std::logic_error&) {
+    }
+    blindLevels.resumeBlindClock();
     blindLevels.startNextHand();
     assert(blindLevels.viewFor().blindLevel == 1);
     assert(blindLevels.viewFor().smallBlind == 50);

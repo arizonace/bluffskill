@@ -452,7 +452,10 @@ void Table::startHand() {
     auto* small = nextLiveSeatAfter(*dealerSeat_);
     auto* big = nextLiveSeatAfter(small->number);
     if (live.size() == 2) {
-        small = const_cast<Seat*>(live.front());
+        // In heads-up play the dealer/button posts the small blind. The
+        // preceding assignment made big point at the dealer, so make that
+        // relationship explicit rather than choosing the lowest-numbered seat.
+        small = big;
         big = nextLiveSeatAfter(small->number);
     }
 
@@ -496,6 +499,7 @@ void Table::startHand() {
 
 void Table::startNextHand() {
     if (gameQuit_) throw std::logic_error("the game has ended");
+    if (blindClockPaused_) throw std::logic_error("the table is paused");
     if (street_ != Street::showdown) throw std::logic_error("the current hand has not finished");
     if (!dealerSeat_) throw std::logic_error("the finished hand has no dealer");
     const auto* nextDealer = nextEligibleSeatAfter(*dealerSeat_);
@@ -923,6 +927,7 @@ void Table::advanceAfterAction(Seat& actor, bool fullRaise) {
 }
 
 void Table::submitAction(std::string_view playerName, Action action, Chips amount, std::uint64_t expectedSequence) {
+    if (blindClockPaused_) throw CommandError(CommandFailure::turnConflict, "the table is paused");
     if (expectedSequence != eventSequence_) throw CommandError(CommandFailure::staleSequence, "table state is stale; refresh the table view");
     if (street_ == Street::waiting || street_ == Street::showdown || !actingSeat_) throw CommandError(CommandFailure::turnConflict, "the table is not accepting actions");
     auto& actor = seatFor(playerName);

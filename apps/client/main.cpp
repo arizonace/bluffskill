@@ -1488,6 +1488,10 @@ private:
         autoConnectInProgress_ = false;
         stopNextDealCountdown();
         stopTurnCountdown();
+        paused_ = false;
+        pauseReason_ = PauseReason::none;
+        pauseRequestInFlight_ = false;
+        setPausePlayButtonMode(false);
         serverUrl_ = QUrl{};
         resetDisconnectedUi();
         statusBar()->showMessage("Disconnected.");
@@ -2213,12 +2217,17 @@ private:
     }
 
     void beginNextDealCountdown(int delayMilliseconds, bool uninterruptedDelay = false) {
-        if (pauseReason_ == PauseReason::deal) { paused_ = false; pauseReason_ = PauseReason::none; }
         nextDealUsesUninterruptedDelay_ = uninterruptedDelay;
         nextDealMilliseconds_ = delayMilliseconds;
         nextDealIn_->setText(countdownValue(nextDealMilliseconds_));
-        dealNowButton_->setEnabled(true);
         pausePlayButton_->setEnabled(true);
+        if (paused_) {
+            pauseReason_ = PauseReason::deal;
+            dealNowButton_->setEnabled(false);
+            setPausePlayButtonMode(true);
+            return;
+        }
+        dealNowButton_->setEnabled(true);
         setPausePlayButtonMode(false);
         nextDealCountdownTimer_.start(50);
         nextHandTimer_.start(nextDealMilliseconds_);
@@ -2231,8 +2240,7 @@ private:
         nextDealMilliseconds_ = 0;
         if (nextDealIn_) nextDealIn_->setText("—");
         if (dealNowButton_) dealNowButton_->setEnabled(false);
-        if (pauseReason_ == PauseReason::deal) { paused_ = false; pauseReason_ = PauseReason::none; }
-        if (turnSequence_ < 0) pausePlayButton_->setEnabled(false);
+        if (turnSequence_ < 0 && !paused_) pausePlayButton_->setEnabled(false);
     }
 
     void advanceNextDealCountdown() {
@@ -2250,6 +2258,13 @@ private:
         if (turnSequence_ == tableSequence_) {
             turnCanCheck_ = canCheck;
             turnCanFold_ = canFold;
+            if (paused_) {
+                pauseReason_ = PauseReason::turn;
+                setActionControlsEnabled(false);
+                setWagerControlsEnabled(false);
+                pausePlayButton_->setEnabled(true);
+                setPausePlayButtonMode(true);
+            }
             setActionClockVisible(true);
             return;
         }
@@ -2257,6 +2272,15 @@ private:
         turnSeconds_ = settings_.playerClockSeconds;
         turnCanCheck_ = canCheck;
         turnCanFold_ = canFold;
+        if (paused_) {
+            pauseReason_ = PauseReason::turn;
+            setActionControlsEnabled(false);
+            setWagerControlsEnabled(false);
+            setActionClockVisible(true);
+            pausePlayButton_->setEnabled(true);
+            setPausePlayButtonMode(true);
+            return;
+        }
         turnCountdownTimer_.start(1'000);
         setActionClockVisible(true);
         pausePlayButton_->setEnabled(true);
@@ -2271,8 +2295,7 @@ private:
         turnCanFold_ = false;
         setActionClockVisible(false);
         setActionDetailsVisible(false);
-        if (pauseReason_ == PauseReason::turn) { paused_ = false; pauseReason_ = PauseReason::none; }
-        if (nextDealMilliseconds_ == 0) pausePlayButton_->setEnabled(false);
+        if (nextDealMilliseconds_ == 0 && !paused_) pausePlayButton_->setEnabled(false);
     }
 
     void togglePause() {
@@ -2303,6 +2326,7 @@ private:
 
     void setPaused(bool pause) {
         if (pause) {
+            paused_ = true;
             if (turnCountdownTimer_.isActive()) {
                 turnCountdownTimer_.stop();
                 pauseReason_ = PauseReason::turn;
@@ -2312,10 +2336,11 @@ private:
                 nextDealCountdownTimer_.stop();
                 pauseReason_ = PauseReason::deal;
                 statusBar()->showMessage("Game paused. Next deal in " + durationText(nextDealMilliseconds_) + ".");
-            } else {
-                return;
             }
-            paused_ = true;
+            setActionControlsEnabled(false);
+            setWagerControlsEnabled(false);
+            dealNowButton_->setEnabled(false);
+            pausePlayButton_->setEnabled(true);
             setPausePlayButtonMode(true);
             return;
         }
@@ -2329,7 +2354,9 @@ private:
             nextHandTimer_.start(nextDealMilliseconds_);
         }
         pauseReason_ = PauseReason::none;
+        pausePlayButton_->setEnabled(true);
         setPausePlayButtonMode(false);
+        refreshTableView();
     }
 
     void advanceTurnCountdown() {
@@ -2349,7 +2376,7 @@ private:
     }
 
     void startNextHand() {
-        if (!connected_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
+        if (!connected_ || paused_ || competition_->currentIndex() < 0 || table_->currentIndex() < 0) return;
         if (nextHandRequestInFlight_) return;
         nextHandRequestInFlight_ = true;
         stopNextDealCountdown();
@@ -2661,7 +2688,7 @@ private:
     }
 
     void selectHumanAction(const char* actionName, bool confirmFold = true) {
-        if (!humanPlayer_ || automatedActionTimer_.isActive() || !automatedActionQueue_.isEmpty()) return;
+        if (!humanPlayer_ || paused_ || automatedActionTimer_.isActive() || !automatedActionQueue_.isEmpty()) return;
         const auto action = QString::fromUtf8(actionName);
         if (action == "Fold" && confirmFold && turnCanCheck_) {
             const auto countdownWasRunning = turnCountdownTimer_.isActive();
@@ -2760,6 +2787,10 @@ private:
         nextHandRequestInFlight_ = false;
         stopNextDealCountdown();
         stopTurnCountdown();
+        paused_ = false;
+        pauseReason_ = PauseReason::none;
+        pauseRequestInFlight_ = false;
+        setPausePlayButtonMode(false);
         statusBar()->showMessage("No human player is attached.");
         totalCommitment_->setText("—");
         raiseSummary_->clear();
