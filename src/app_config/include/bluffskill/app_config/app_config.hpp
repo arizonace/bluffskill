@@ -42,6 +42,9 @@ public:
     [[nodiscard]] static QString filePath();
     [[nodiscard]] static Settings load();
     static void save(const Settings& settings);
+    // Saves only client-owned preferences. In particular, it never replaces
+    // the server's chip, blind-schedule, logging, or action-log settings.
+    static void saveClientSettings(const Settings& settings);
 };
 
 } // namespace bluffskill::app_config

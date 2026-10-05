@@ -135,4 +135,22 @@ void AppConfig::save(const Settings& input) {
     store.sync();
 }
 
+void AppConfig::saveClientSettings(const Settings& input) {
+    const auto settings = normalized(input);
+    const auto path = filePath();
+    QDir().mkpath(QFileInfo(path).dir().absolutePath());
+    QSettings store(path, QSettings::IniFormat);
+    store.setValue("timers/playerClockSeconds", settings.playerClockSeconds);
+    store.setValue("timers/dealClockSeconds", settings.dealClockSeconds);
+    store.setValue("timers/uninterruptedDealerDelayMilliseconds", settings.uninterruptedDealerDelayMilliseconds);
+    store.setValue("timers/automatedPlayerDelayMilliseconds", settings.automatedPlayerDelayMilliseconds);
+    store.setValue("client/defaultPlayerName", settings.defaultPlayerName);
+    store.setValue("client/autoConnect", settings.clientAutoConnect);
+    store.setValue("preferences/soundEffects", settings.soundEffects);
+    QStringList ports;
+    for (const auto port : settings.serverPreferredPorts) ports.append(QString::number(port));
+    store.setValue("server/preferredPorts", ports);
+    store.sync();
+}
+
 } // namespace bluffskill::app_config

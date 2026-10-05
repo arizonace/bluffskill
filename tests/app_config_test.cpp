@@ -2,6 +2,8 @@
 
 #include <cassert>
 
+#include <QFile>
+
 int main() {
     const bluffskill::app_config::Settings settings;
 
@@ -27,6 +29,30 @@ int main() {
     assert(settings.serverActionLogVisibleColumns.contains("Details"));
     assert(!settings.serverActionLogVisibleColumns.contains("Index"));
     assert(!settings.serverActionLogVisibleColumns.contains("Hole"));
+
+    const auto configPath = bluffskill::app_config::AppConfig::filePath();
+    assert(configPath.startsWith(qEnvironmentVariable("HOME")));
+    QFile::remove(configPath);
+
+    auto serverSettings = settings;
+    serverSettings.smallBlind = 100;
+    serverSettings.blindHandsPerLevel = 2;
+    serverSettings.blindMinutesPerLevel = 3;
+    bluffskill::app_config::AppConfig::save(serverSettings);
+
+    auto staleClientSettings = settings;
+    staleClientSettings.defaultPlayerName = "Client Player";
+    staleClientSettings.soundEffects = false;
+    staleClientSettings.blindHandsPerLevel = 10'000;
+    staleClientSettings.blindMinutesPerLevel = 3'600;
+    bluffskill::app_config::AppConfig::saveClientSettings(staleClientSettings);
+
+    const auto persisted = bluffskill::app_config::AppConfig::load();
+    assert(persisted.smallBlind == 100);
+    assert(persisted.blindHandsPerLevel == 2);
+    assert(persisted.blindMinutesPerLevel == 3);
+    assert(persisted.defaultPlayerName == "Client Player");
+    assert(!persisted.soundEffects);
 
     return 0;
 }

@@ -696,8 +696,6 @@ public:
         dealClock_ = new QSpinBox(this); dealClock_->setRange(1, 3600); dealClock_->setValue(settings.dealClockSeconds);
         uninterruptedDealerDelay_ = delaySpinBox(settings.uninterruptedDealerDelayMilliseconds, this);
         automatedPlayerDelay_ = delaySpinBox(settings.automatedPlayerDelayMilliseconds, this);
-        blindHands_ = new QSpinBox(this); blindHands_->setRange(1, 10000); blindHands_->setValue(settings.blindHandsPerLevel);
-        blindMinutes_ = new QSpinBox(this); blindMinutes_->setRange(1, 3600); blindMinutes_->setValue(settings.blindMinutesPerLevel);
         defaultPlayerName_ = new QLineEdit(settings.defaultPlayerName, this);
         autoConnect_ = new QCheckBox("Automatically try preferred localhost ports", this); autoConnect_->setChecked(settings.clientAutoConnect);
         soundEffects_ = new QCheckBox("Enable sound effects", this); soundEffects_->setChecked(settings.soundEffects);
@@ -708,8 +706,6 @@ public:
         layout->addRow("Deal Clock (seconds)", dealClock_);
         layout->addRow("Uninterrupted Dealer Delay (fractional seconds)", uninterruptedDealerDelay_);
         layout->addRow("Automated Player Delay (fractional seconds)", automatedPlayerDelay_);
-        layout->addRow("Blind Increase (hands)", blindHands_);
-        layout->addRow("Blind Increase (minutes)", blindMinutes_);
         layout->addRow("Default Player Name", defaultPlayerName_);
         layout->addRow("Preferred Port 1", ports_[0]);
         layout->addRow("Preferred Port 2", ports_[1]);
@@ -727,8 +723,6 @@ public:
         value.dealClockSeconds = dealClock_->value();
         value.uninterruptedDealerDelayMilliseconds = milliseconds(*uninterruptedDealerDelay_);
         value.automatedPlayerDelayMilliseconds = milliseconds(*automatedPlayerDelay_);
-        value.blindHandsPerLevel = blindHands_->value();
-        value.blindMinutesPerLevel = blindMinutes_->value();
         value.defaultPlayerName = defaultPlayerName_->text();
         value.clientAutoConnect = autoConnect_->isChecked();
         value.soundEffects = soundEffects_->isChecked();
@@ -755,8 +749,6 @@ private:
     QSpinBox* dealClock_{};
     QLineEdit* uninterruptedDealerDelay_{};
     QLineEdit* automatedPlayerDelay_{};
-    QSpinBox* blindHands_{};
-    QSpinBox* blindMinutes_{};
     QLineEdit* defaultPlayerName_{};
     QCheckBox* autoConnect_{};
     QCheckBox* soundEffects_{};
@@ -985,7 +977,7 @@ public:
         setSoundEffectsButtonState();
         connect(soundEffectsButton_, &QPushButton::clicked, this, [this] {
             settings_.soundEffects = soundEffectsButton_->isChecked();
-            bluffskill::app_config::AppConfig::save(settings_);
+            bluffskill::app_config::AppConfig::saveClientSettings(settings_);
             setSoundEffectsButtonState();
         });
         connectionRow->addWidget(soundEffectsButton_);
@@ -1362,7 +1354,7 @@ private:
         if (dialog.exec() != QDialog::Accepted) return;
         const auto previous = settings_;
         settings_ = dialog.settings(settings_);
-        bluffskill::app_config::AppConfig::save(settings_);
+        bluffskill::app_config::AppConfig::saveClientSettings(settings_);
         setSoundEffectsButtonState();
         applyUpdatedPresentationDelays(previous);
         statusBar()->showMessage("Settings saved. Active automated waits use the new delays immediately.");
@@ -2482,7 +2474,7 @@ private:
         if (dialog.exec() != QDialog::Accepted) return;
         const auto playerName = dialog.playerName();
         settings_.defaultPlayerName = playerName;
-        bluffskill::app_config::AppConfig::save(settings_);
+        bluffskill::app_config::AppConfig::saveClientSettings(settings_);
         clearHumanPlayer();
         const auto attempt = connectionGeneration_;
         pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(playerName, dialog.recordsHoleCards());
@@ -2530,7 +2522,7 @@ private:
         clearHumanPlayer();
         if (configuration.includeHuman) {
             settings_.defaultPlayerName = configuration.playerName;
-            bluffskill::app_config::AppConfig::save(settings_);
+            bluffskill::app_config::AppConfig::saveClientSettings(settings_);
             pendingHumanPlayer_ = std::make_unique<bluffskill::client::HumanPlayer>(
                 configuration.playerName, configuration.humanRecordsHoleCards);
         }
