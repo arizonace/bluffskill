@@ -21,7 +21,7 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 | `POST` | `/v1/competitions/{competition}/tables/{table}/resume` | resume presentation and the table's time-based blind clock |
 | `GET` | `/v1/competitions/{competition}/events` | stream view-projected notifications |
 
-`GET /v1/health` includes `referencePlayerTypes`, the server's registered reference-player names. Clients use it to build Custom Game selection controls, rather than maintaining a type list of their own. Each table in the table-list response includes `maximumSeats`, its current color-named `game`, and a `players` array. Every player entry has a one-based `seat`, name, and player kind; a player may be added to a competition only when it is assigned to a free table seat. Tables use element names: the current one-table prototype always creates `Hydrogen`.
+`GET /v1/health` includes `referencePlayerTypes`, the server's registered reference-player names, plus the configured `defaultStartingStack` and `smallestChipDenomination` for Custom Game input. Clients use it to build Custom Game selection controls, rather than maintaining a type list of their own. Each table in the table-list response includes `maximumSeats`, its current color-named `game`, and a `players` array. Every player entry has a one-based `seat`, name, and player kind; a player may be added to a competition only when it is assigned to a free table seat. Tables use element names: the current one-table prototype always creates `Hydrogen`.
 
 `POST /v1/competitions/{competition}/tables/{table}/players` accepts an API player `name` and optional `recordHoleCards` boolean, which defaults to false. The latter is consent for the private server action-log export to retain that API player's cards on Fold events; it is not a human/bot/GUI identity field and is never returned in public views. A human client and an automated remote client remain indistinguishable to the server.
 
@@ -30,10 +30,10 @@ All endpoints use JSON and return an `X-BluffSkill-Sequence` header when they ar
 Creation request example:
 
 ```json
-{ "flavor": "NoLimitTexasHoldEm", "maximumPlayers": 10 }
+{ "flavor": "NoLimitTexasHoldEm", "maximumPlayers": 6, "startingStack": 7500 }
 ```
 
-For a locally running server at port `53153`, these commands list competitions, create one, then add nine reference players. `POST /v1/competitions` creates; it never lists. A table begins its first hand when all of its seats are occupied, allowing a client to place its API player between two reference-player creation groups.
+`maximumPlayers` must be from 2 through 10. `startingStack` is optional and defaults to the server's configured stack; when supplied, it must be a positive multiple of the smallest configured chip denomination. For a locally running server at port `53153`, these commands list competitions, create one, then add nine reference players. `POST /v1/competitions` creates; it never lists. A table begins its first hand when all of its seats are occupied, allowing a client to place its API player between two reference-player creation groups.
 
 ```sh
 curl http://127.0.0.1:53153/v1/competitions

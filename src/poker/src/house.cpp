@@ -173,8 +173,8 @@ std::string House::nextGameName(Competition& competition) {
 }
 
 CompetitionSummary House::createSingleTableTournament(TournamentSpec spec) {
-    if (spec.maximumPlayers == 0 || spec.maximumPlayers > 10) {
-        throw std::invalid_argument("maximumPlayers must be between 1 and 10");
+    if (spec.maximumPlayers < 2 || spec.maximumPlayers > 10) {
+        throw std::invalid_argument("maximumPlayers must be between 2 and 10");
     }
     if (spec.startingStack <= 0) throw std::invalid_argument("startingStack must be positive");
 

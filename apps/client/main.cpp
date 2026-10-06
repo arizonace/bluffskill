@@ -807,6 +807,8 @@ private:
 struct CustomGameConfiguration {
     bool includeHuman{true};
     bool humanRecordsHoleCards{false};
+    int maximumPlayers{defaultTableSeats};
+    qint64 startingStack{7'500};
     int repetitions{1};
     QString playerName;
     struct ReferencePlayerCount {
@@ -848,10 +850,12 @@ private:
 class CustomGameDialog final : public QDialog {
 public:
     explicit CustomGameDialog(const QString& defaultPlayerName, const QVector<QString>& referencePlayerTypes,
-        const std::optional<CustomGameConfiguration>& previous, QWidget* parent = nullptr) : QDialog(parent) {
+        qint64 defaultStartingStack, qint64 smallestChipDenomination,
+        const std::optional<CustomGameConfiguration>& previous, QWidget* parent = nullptr) : QDialog(parent),
+        smallestChipDenomination_(std::max<qint64>(1, smallestChipDenomination)) {
         setWindowTitle("Custom Game");
         auto* layout = new QVBoxLayout(this);
-        layout->addWidget(new QLabel("Choose exactly 10 players for this table.", this));
+        layout->addWidget(new QLabel("Choose from 2 to 10 players for this table.", this));
         auto* form = new QFormLayout;
         includeHuman_ = new QCheckBox("Include local human player", this);
         includeHuman_->setChecked(previous ? previous->includeHuman : true);
@@ -861,10 +865,17 @@ public:
         repetitions_ = new QSpinBox(this);
         repetitions_->setRange(1, 28);
         repetitions_->setValue(previous ? previous->repetitions : 1);
+        maximumPlayers_ = new QSpinBox(this);
+        maximumPlayers_->setRange(2, defaultTableSeats);
+        maximumPlayers_->setValue(previous ? previous->maximumPlayers : defaultTableSeats);
+        startingStack_ = new QLineEdit(QString::number(previous ? previous->startingStack : defaultStartingStack), this);
+        startingStack_->setAccessibleName("Starting stack");
         total_ = new QLabel(this);
         form->addRow("Human player", includeHuman_);
         form->addRow("Player name", playerName_);
         form->addRow("Fold-card logging", recordHoleCards_);
+        form->addRow("Players", maximumPlayers_);
+        form->addRow("Starting stack (multiple of " + QString::number(smallestChipDenomination_) + ')', startingStack_);
         form->addRow("Repetitions", repetitions_);
         for (const auto& type : referencePlayerTypes) {
             auto* count = new QSpinBox(this);
@@ -889,13 +900,17 @@ public:
         connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject);
         connect(includeHuman_, &QCheckBox::toggled, this, [this] { updateState(); });
         connect(playerName_, &QLineEdit::textChanged, this, [this] { updateState(); });
+        connect(maximumPlayers_, qOverload<int>(&QSpinBox::valueChanged), this, [this] { updateState(); });
+        connect(startingStack_, &QLineEdit::textChanged, this, [this] { updateState(); });
         layout->addWidget(buttons_);
         updateState();
     }
 
     [[nodiscard]] CustomGameConfiguration configuration() const {
         CustomGameConfiguration configuration{.includeHuman = includeHuman_->isChecked(),
-            .humanRecordsHoleCards = recordHoleCards_->isChecked(), .repetitions = includeHuman_->isChecked() ? 1 : repetitions_->value(),
+            .humanRecordsHoleCards = recordHoleCards_->isChecked(), .maximumPlayers = maximumPlayers_->value(),
+            .startingStack = startingStack_->text().toLongLong(),
+            .repetitions = includeHuman_->isChecked() ? 1 : repetitions_->value(),
             .playerName = playerName_->text().trimmed()};
         for (const auto& player : referencePlayers_) {
             configuration.referencePlayers.append({.type = player.type, .count = player.count->value()});
@@ -910,16 +925,24 @@ private:
         repetitions_->setEnabled(!includeHuman_->isChecked());
         auto total = includeHuman_->isChecked() ? 1 : 0;
         for (const auto& player : referencePlayers_) total += player.count->value();
-        const auto valid = total == defaultTableSeats && (!includeHuman_->isChecked() || !playerName_->text().trimmed().isEmpty());
-        total_->setText(QString::number(total) + " / " + QString::number(defaultTableSeats));
+        bool stackIsNumber = false;
+        const auto stack = startingStack_->text().toLongLong(&stackIsNumber);
+        const auto validStack = stackIsNumber && stack > 0 && stack % smallestChipDenomination_ == 0;
+        const auto valid = total == maximumPlayers_->value() && validStack
+            && (!includeHuman_->isChecked() || !playerName_->text().trimmed().isEmpty());
+        total_->setText(QString::number(total) + " / " + QString::number(maximumPlayers_->value()));
         total_->setStyleSheet(valid ? QString{} : QStringLiteral("color: #B00020;"));
+        startingStack_->setStyleSheet(validStack ? QString{} : QStringLiteral("color: #B00020;"));
         buttons_->button(QDialogButtonBox::Ok)->setEnabled(valid);
     }
 
     QCheckBox* includeHuman_{};
     QLineEdit* playerName_{};
     QCheckBox* recordHoleCards_{};
+    QSpinBox* maximumPlayers_{};
+    QLineEdit* startingStack_{};
     QSpinBox* repetitions_{};
+    qint64 smallestChipDenomination_{};
     struct ReferencePlayerControl {
         QString type;
         QSpinBox* count{};
@@ -1443,6 +1466,10 @@ private:
                 if (!type.isEmpty()) availableReferencePlayerTypes_.append(type);
             }
             if (availableReferencePlayerTypes_.isEmpty()) availableReferencePlayerTypes_ = {"Leo", "Virgo"};
+            const auto configuredStack = body.value("defaultStartingStack").toInteger();
+            if (configuredStack > 0) defaultStartingStack_ = configuredStack;
+            const auto smallestChip = body.value("smallestChipDenomination").toInteger();
+            if (smallestChip > 0) smallestChipDenomination_ = smallestChip;
             clearHumanPlayer();
             server_->setEnabled(true);
             server_->clear();
@@ -2541,7 +2568,8 @@ private:
 
     void customGame() {
         if (!connected_) return;
-        CustomGameDialog dialog(settings_.defaultPlayerName, availableReferencePlayerTypes_, lastCustomGameConfiguration_, this);
+        CustomGameDialog dialog(settings_.defaultPlayerName, availableReferencePlayerTypes_, defaultStartingStack_, smallestChipDenomination_,
+            lastCustomGameConfiguration_, this);
         if (dialog.exec() != QDialog::Accepted) return;
         const auto configuration = dialog.configuration();
         lastCustomGameConfiguration_ = configuration;
@@ -2555,7 +2583,7 @@ private:
         }
 
         auto referenceTypes = referencePlayerTypes(configuration.referencePlayers);
-        const auto humanSeat = configuration.includeHuman ? QRandomGenerator::global()->bounded(1, defaultTableSeats + 1) : 0;
+        const auto humanSeat = configuration.includeHuman ? QRandomGenerator::global()->bounded(1, configuration.maximumPlayers + 1) : 0;
         QVector<QString> referencesBeforeHuman;
         QVector<QString> referencesAfterHuman;
         for (qsizetype index = 0; index < referenceTypes.size(); ++index) {
@@ -2567,7 +2595,8 @@ private:
         statusBar()->showMessage("Creating a custom tournament…");
         auto* reply = postJson("/v1/competitions", QJsonObject{
             {"flavor", "NoLimitTexasHoldEm"},
-            {"maximumPlayers", defaultTableSeats},
+            {"maximumPlayers", configuration.maximumPlayers},
+            {"startingStack", configuration.startingStack},
         });
         connect(reply, &QNetworkReply::finished, this, [this, reply, attempt, configuration, humanSeat,
             referencesBeforeHuman = std::move(referencesBeforeHuman), referencesAfterHuman = std::move(referencesAfterHuman)]() mutable {
@@ -2591,7 +2620,7 @@ private:
                     }
                     setNewGameActionsEnabled(true);
                     statusBar()->showMessage("Created " + competitionName + " with "
-                        + QString::number(defaultTableSeats) + " reference players and "
+                        + QString::number(configuration.maximumPlayers) + " reference players and "
                         + QString::number(configuration.repetitions) + " game"
                         + (configuration.repetitions == 1 ? QString{} : QStringLiteral("s")) + ".");
                     refreshCompetitions(competitionName);
@@ -2918,6 +2947,8 @@ private:
     QAction* restartGameAction_{};
     QAction* quitGameAction_{};
     std::optional<CustomGameConfiguration> lastCustomGameConfiguration_;
+    qint64 defaultStartingStack_{7'500};
+    qint64 smallestChipDenomination_{1};
     qsizetype autoConnectPortIndex_{};
     std::uint64_t handInsightRequestGeneration_{};
     std::unique_ptr<bluffskill::client::HumanPlayer> pendingHumanPlayer_;

@@ -17,6 +17,11 @@ int main() {
     const auto created = house.createSingleTableTournament({.maximumPlayers = 10, .startingStack = 7000});
     assert(created.tables.front().name == "Hydrogen");
     assert(created.tables.front().gameName == "Red");
+    try {
+        [[maybe_unused]] const auto onePlayer = house.createSingleTableTournament({.maximumPlayers = 1, .startingStack = 7'000});
+        assert(false && "a tournament requires at least two players");
+    } catch (const std::invalid_argument&) {
+    }
     const auto populated = house.createReferencePlayers(created.name, 6);
     assert(populated.tables.front().players.size() == 6);
     std::set<std::string> names;

@@ -318,7 +318,8 @@ public:
 
     bluffskill::poker::House& house() noexcept { return house_; }
 
-    [[nodiscard]] bluffskill::poker::CompetitionSummary createCompetition(std::size_t maximumPlayers) {
+    [[nodiscard]] bluffskill::poker::CompetitionSummary createCompetition(std::size_t maximumPlayers,
+        std::optional<bluffskill::poker::Chips> requestedStartingStack = std::nullopt) {
         auto competitionSettings = settings_;
         const auto smallestChip = competitionSettings.chipDenominations.front();
         const auto amountsAreValid = competitionSettings.smallBlind > 0 && competitionSettings.stack > 0
@@ -330,11 +331,20 @@ public:
                 "using smallBlind=" + QString::number(competitionSettings.smallBlind)
                 + " and stack=" + QString::number(competitionSettings.stack) + " for this competition.");
         }
+        const auto startingStack = requestedStartingStack.value_or(competitionSettings.stack);
+        if (startingStack <= 0 || startingStack % smallestChip != 0) {
+            throw std::invalid_argument("startingStack must be a positive multiple of the smallest chip denomination");
+        }
         house_.setDefaultCompetitionSettings(pokerBlindSchedule(competitionSettings), pokerChipDenominations(competitionSettings));
         return house_.createSingleTableTournament({
             .maximumPlayers = maximumPlayers,
-            .startingStack = competitionSettings.stack,
+            .startingStack = startingStack,
         });
+    }
+
+    [[nodiscard]] bluffskill::poker::Chips configuredStartingStack() const noexcept { return settings_.stack; }
+    [[nodiscard]] bluffskill::poker::Chips smallestChipDenomination() const noexcept {
+        return settings_.chipDenominations.front();
     }
 
     [[nodiscard]] bluffskill::poker::TableWinner quitGame(const QString& competitionName, const QString& tableName, const QString& playerName) {
@@ -1505,7 +1515,9 @@ int main(int argc, char* argv[]) {
 
     server.route("/v1/health", [&window] {
         return window.jsonResponse("GET /v1/health → 200",
-            QJsonObject{{"status", "ok"}, {"referencePlayerTypes", referencePlayerTypesJson(window.house())}});
+            QJsonObject{{"status", "ok"}, {"referencePlayerTypes", referencePlayerTypesJson(window.house())},
+                {"defaultStartingStack", static_cast<qint64>(window.configuredStartingStack())},
+                {"smallestChipDenomination", static_cast<qint64>(window.smallestChipDenomination())}});
     });
 
     server.route("/v1/competitions", QHttpServerRequest::Method::Post,
@@ -1513,7 +1525,10 @@ int main(int argc, char* argv[]) {
             window.logRequestJson(request);
             const auto json = QJsonDocument::fromJson(request.body()).object();
             try {
-                const auto competition = window.createCompetition(static_cast<std::size_t>(json.value("maximumPlayers").toInt(10)));
+                std::optional<bluffskill::poker::Chips> startingStack;
+                if (json.contains("startingStack")) startingStack = json.value("startingStack").toInteger();
+                const auto competition = window.createCompetition(
+                    static_cast<std::size_t>(json.value("maximumPlayers").toInt(10)), startingStack);
                 window.refreshTree();
                 return window.jsonResponse("POST /v1/competitions → 201 (" + QString::fromStdString(competition.name) + ')',
                     competitionJson(competition), QHttpServerResponder::StatusCode::Created);
