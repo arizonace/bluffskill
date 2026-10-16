@@ -880,15 +880,14 @@ public:
         for (const auto& type : referencePlayerTypes) {
             auto* count = new QSpinBox(this);
             count->setRange(0, defaultTableSeats);
+            const auto defaultCount = type == "Leo" || type == "Virgo" || type == "Libra" ? 3 : 0;
             if (previous) {
                 const auto remembered = std::ranges::find_if(previous->referencePlayers, [&type](const auto& player) {
                     return player.type == type;
                 });
                 if (remembered != previous->referencePlayers.end()) count->setValue(remembered->count);
-                else if (type == "Leo") count->setValue(5);
-                else if (type == "Virgo") count->setValue(4);
-            } else if (type == "Leo") count->setValue(5);
-            else if (type == "Virgo") count->setValue(4);
+                else count->setValue(defaultCount);
+            } else count->setValue(defaultCount);
             referencePlayers_.append({.type = type, .count = count});
             form->addRow(type + " players", count);
             connect(count, qOverload<int>(&QSpinBox::valueChanged), this, [this] { updateState(); });
